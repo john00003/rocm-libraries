@@ -257,7 +257,7 @@ public:
             &sharedMemPerBlock, hipDeviceAttribute_t(hipDeviceAttributeMaxSharedMemoryPerBlock), device));
         }
 
-        return sharedMemPerBlock
+        return sharedMemPerBlock;
     }
 
     bool isYZGridDim16bit()
