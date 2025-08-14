@@ -252,10 +252,12 @@ public:
 
     int getMaxSharedMemPerBlock()
     {
-        int max_mem = -1;
+        if (sharedMemPerBlock == -1){
         THROW_IF_HIP_ERROR(hipDeviceGetAttribute(
-            &max_mem, hipDeviceAttribute_t(hipDeviceAttributeMaxSharedMemoryPerBlock), device));
-        return max_mem;
+            &sharedMemPerBlock, hipDeviceAttribute_t(hipDeviceAttributeMaxSharedMemoryPerBlock), device));
+        }
+
+        return sharedMemPerBlock
     }
 
     bool isYZGridDim16bit()
@@ -570,6 +572,7 @@ private:
     int       archMajorMinor;
 
     int mWarpSize;
+    int sharedMemPerBlock = -1;
 
     // hipBLASLt handle is created at handle creation time and remains in effect for the life of the handle.
     std::shared_ptr<hipblasLtHandle_t> hipblasLtHandle;
