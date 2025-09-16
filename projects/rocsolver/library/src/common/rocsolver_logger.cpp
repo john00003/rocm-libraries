@@ -103,11 +103,16 @@ rocsolver_log_entry& rocsolver_logger::push_log_entry(rocblas_handle handle, std
     result.level = stack.size() - 1;
 
 #if ROCSOLVER_USE_ASYNC_LOGGER
+    // Track logger overhead for HIP event operations
+    double start_overhead = get_time_us_no_sync();
+    
     // HIP event-based timing: create and record a start event
     hipStream_t stream = nullptr;
     rocblas_get_stream(handle, &stream);
     THROW_IF_HIP_ERROR(hipEventCreate(&result.start_evt));
     THROW_IF_HIP_ERROR(hipEventRecord(result.start_evt, stream));
+    
+    result.logger_overhead_us = get_time_us_no_sync() - start_overhead;
 #else
     // Synchronous timing: record start time without sync
     result.start_time = get_time_us_no_sync();
@@ -132,11 +137,16 @@ rocsolver_log_entry rocsolver_logger::pop_log_entry(rocblas_handle handle)
     rocsolver_log_entry result = stack.back();
 
 #if ROCSOLVER_USE_ASYNC_LOGGER
+    // Track overhead for stop event operations
+    double start_overhead = get_time_us_no_sync();
+    
     // HIP event-based timing: create and record a stop event
     hipStream_t stream = nullptr;
     rocblas_get_stream(handle, &stream);
     THROW_IF_HIP_ERROR(hipEventCreate(&result.stop_evt));
     THROW_IF_HIP_ERROR(hipEventRecord(result.stop_evt, stream));
+    
+    result.logger_overhead_us += get_time_us_no_sync() - start_overhead;
 #endif
     // For synchronous logger, no additional timing work needed here
 
@@ -274,17 +284,44 @@ void rocsolver_logger::accumulate_times(rocsolver_profile_map& m)
     {
         rocsolver_profile_entry& entry = kv.second;
         entry.total_time = 0;
-        for(auto& pair : entry.events)
+        
+        for(size_t i = 0; i < entry.events.size(); ++i)
         {
+            auto& pair = entry.events[i];
+            double logger_overhead = entry.event_overheads[i];
+            
+            // Track overhead from HIP timing operations
+            double start_overhead = get_time_us_no_sync();
+            
             float ms = 0;
             if(pair.first && pair.second)
                 THROW_IF_HIP_ERROR(hipEventElapsedTime(&ms, pair.first, pair.second));
-            entry.total_time += ms * 1000; // us
+            
             // destroy events after measurement
             THROW_IF_HIP_ERROR(hipEventDestroy(pair.first));
             THROW_IF_HIP_ERROR(hipEventDestroy(pair.second));
+            
+            double timing_overhead = get_time_us_no_sync() - start_overhead;
+            
+            // Convert GPU time to microseconds and calculate total overhead
+            double gpu_time_us = ms * 1000.0;
+            double total_overhead = logger_overhead + timing_overhead;
+            
+            // Ensure total overhead is not greater than or equal to GPU time
+            if(total_overhead >= gpu_time_us)
+            {
+                throw std::runtime_error(fmt::format(
+                    "Logger overhead ({:.3f} us) is greater than or equal to GPU time ({:.3f} us) for function '{}'",
+                    total_overhead, gpu_time_us, kv.first));
+            }
+            
+            double corrected_time = gpu_time_us - total_overhead;
+            entry.total_time += corrected_time;
         }
+        
         entry.events.clear();
+        entry.event_overheads.clear();
+        
         // recurse on internal calls
         if(entry.internal_calls)
             accumulate_times(*entry.internal_calls);

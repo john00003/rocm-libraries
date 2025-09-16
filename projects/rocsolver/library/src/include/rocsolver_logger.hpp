@@ -131,11 +131,13 @@ struct rocsolver_log_entry
 #if ROCSOLVER_USE_ASYNC_LOGGER
     hipEvent_t start_evt = nullptr;
     hipEvent_t stop_evt = nullptr;
+    double logger_overhead_us = 0.0;  // Track logger overhead in microseconds
 
     rocsolver_log_entry()
         : level(0)
         , start_evt(nullptr)
         , stop_evt(nullptr)
+        , logger_overhead_us(0.0)
     {
     }
 #else
@@ -174,6 +176,9 @@ struct rocsolver_profile_entry
     int calls;
     double total_time; // stores accumulated elapsed time in microseconds
     std::vector<std::pair<hipEvent_t, hipEvent_t>> events;
+#if ROCSOLVER_USE_ASYNC_LOGGER
+    std::vector<double> event_overheads; // parallel to events vector, stores overhead per event
+#endif
     std::unique_ptr<rocsolver_profile_map> internal_calls;
 
     rocsolver_profile_entry()
@@ -312,8 +317,9 @@ private:
         from_profile.level = from_stack.level;
         from_profile.calls++;
 #if ROCSOLVER_USE_ASYNC_LOGGER
-        // store HIP event pair for later to compute time at log_end_impl.
+        // store HIP event pair and overhead for later to compute time at log_end_impl.
         from_profile.events.push_back({from_stack.start_evt, from_stack.stop_evt});
+        from_profile.event_overheads.push_back(from_stack.logger_overhead_us);
 #else
         from_profile.total_time += elapsed_time;
 #endif
