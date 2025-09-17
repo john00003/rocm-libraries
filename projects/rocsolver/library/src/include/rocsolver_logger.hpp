@@ -127,17 +127,17 @@ struct rocsolver_log_entry
     std::vector<std::string> callers;
     std::string name;
     int level;
+    double logger_overhead_us; // Total overhead accumulated during this function call
 
 #if ROCSOLVER_USE_ASYNC_LOGGER
     hipEvent_t start_evt = nullptr;
     hipEvent_t stop_evt = nullptr;
-    double logger_overhead_us = 0.0;  // Track logger overhead in microseconds
 
     rocsolver_log_entry()
         : level(0)
+        , logger_overhead_us(0)
         , start_evt(nullptr)
         , stop_evt(nullptr)
-        , logger_overhead_us(0.0)
     {
     }
 #else
@@ -145,6 +145,7 @@ struct rocsolver_log_entry
 
     rocsolver_log_entry()
         : level(0)
+        , logger_overhead_us(0)
         , start_time(0)
     {
     }
@@ -175,16 +176,15 @@ struct rocsolver_profile_entry
     int level;
     int calls;
     double total_time; // stores accumulated elapsed time in microseconds
+    double total_logger_overhead; // stores accumulated logger overhead in microseconds
     std::vector<std::pair<hipEvent_t, hipEvent_t>> events;
-#if ROCSOLVER_USE_ASYNC_LOGGER
-    std::vector<double> event_overheads; // parallel to events vector, stores overhead per event
-#endif
     std::unique_ptr<rocsolver_profile_map> internal_calls;
 
     rocsolver_profile_entry()
         : level(0)
         , calls(0)
         , total_time(0)
+        , total_logger_overhead(0)
     {
     }
 
@@ -297,6 +297,9 @@ private:
     template <typename T>
     void log_profile(rocblas_handle handle, rocsolver_log_entry& from_stack)
     {
+        // Start timing logger overhead for this function
+        double logger_start = get_time_us_no_sync();
+        
 #if !ROCSOLVER_USE_ASYNC_LOGGER
         hipStream_t stream;
         rocblas_get_stream(handle, &stream);
@@ -316,12 +319,21 @@ private:
         from_profile.name = from_stack.name;
         from_profile.level = from_stack.level;
         from_profile.calls++;
+        
+        // End timing logger overhead and calculate total overhead
+        double logger_end = get_time_us_no_sync();
+        double total_overhead = from_stack.logger_overhead_us + (logger_end - logger_start);
+        
 #if ROCSOLVER_USE_ASYNC_LOGGER
-        // store HIP event pair and overhead for later to compute time at log_end_impl.
+        // store HIP event pair for later to compute time at log_end_impl.
         from_profile.events.push_back({from_stack.start_evt, from_stack.stop_evt});
-        from_profile.event_overheads.push_back(from_stack.logger_overhead_us);
+        // accumulate logger overhead for async mode
+        from_profile.total_logger_overhead += total_overhead;
 #else
-        from_profile.total_time += elapsed_time;
+        // For sync mode: subtract overhead from elapsed time before accumulating
+        double corrected_time = elapsed_time - total_overhead;
+        from_profile.total_time += corrected_time;
+        from_profile.total_logger_overhead += total_overhead;
 #endif
     }
 
