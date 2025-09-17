@@ -97,7 +97,7 @@ rocsolver_log_entry& rocsolver_logger::push_log_entry(rocblas_handle handle, std
 {
     // Start timing logger overhead
     double logger_start = get_time_us_no_sync();
-    
+
     std::vector<rocsolver_log_entry>& stack = call_stack[handle];
     stack.push_back(rocsolver_log_entry());
 
@@ -151,13 +151,22 @@ rocsolver_log_entry rocsolver_logger::pop_log_entry(rocblas_handle handle)
     // For synchronous logger, no additional timing work needed here
 
     stack.pop_back();
-
+    
     if(stack.empty())
         call_stack.erase(handle);
 
     // End timing logger overhead and accumulate it
     double logger_end = get_time_us_no_sync();
     result.logger_overhead_us += (logger_end - logger_start);
+    // Propagate this function's total overhead to parent (if exists)
+    if(!stack.empty())
+    {
+        // Calculate total overhead of the function being popped (own + children)
+        double total_child_overhead = result.logger_overhead_us + result.child_overhead_us;
+        
+        // Add to parent's child overhead accumulator
+        stack.back().child_overhead_us += total_child_overhead + (logger_end - logger_start);
+    }
 
     return result;
 }
@@ -286,7 +295,7 @@ void rocsolver_logger::accumulate_times(rocsolver_profile_map& m)
 {
     // Start timing the overhead of this accumulate_times function
     double accumulate_start = get_time_us_no_sync();
-    
+
     for(auto& kv : m)
     {
         rocsolver_profile_entry& entry = kv.second;
@@ -302,16 +311,16 @@ void rocsolver_logger::accumulate_times(rocsolver_profile_map& m)
             THROW_IF_HIP_ERROR(hipEventDestroy(pair.second));
         }
         entry.events.clear();
-        
+
         // Subtract accumulated logger overhead from total time
         entry.total_time -= entry.total_logger_overhead;
-        
+
         // recurse on internal calls
         if(entry.internal_calls)
             accumulate_times(*entry.internal_calls);
     }
-    
-    // End timing accumulate_times overhead (this overhead is not subtracted since 
+
+    // End timing accumulate_times overhead (this overhead is not subtracted since
     // it occurs after function execution is complete)
     double accumulate_end = get_time_us_no_sync();
     // Note: We don't subtract this overhead as it happens during log_end_impl,

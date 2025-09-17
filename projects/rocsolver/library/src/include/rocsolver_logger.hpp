@@ -127,7 +127,8 @@ struct rocsolver_log_entry
     std::vector<std::string> callers;
     std::string name;
     int level;
-    double logger_overhead_us; // Total overhead accumulated during this function call
+    double logger_overhead_us; // Overhead accumulated by this function's logger operations
+    double child_overhead_us; // Overhead accumulated by child functions
 
 #if ROCSOLVER_USE_ASYNC_LOGGER
     hipEvent_t start_evt = nullptr;
@@ -136,6 +137,7 @@ struct rocsolver_log_entry
     rocsolver_log_entry()
         : level(0)
         , logger_overhead_us(0)
+        , child_overhead_us(0)
         , start_evt(nullptr)
         , stop_evt(nullptr)
     {
@@ -146,6 +148,7 @@ struct rocsolver_log_entry
     rocsolver_log_entry()
         : level(0)
         , logger_overhead_us(0)
+        , child_overhead_us(0)
         , start_time(0)
     {
     }
@@ -320,17 +323,17 @@ private:
         from_profile.level = from_stack.level;
         from_profile.calls++;
         
-        // End timing logger overhead and calculate total overhead
+        // End timing logger overhead and calculate total overhead (own + children)
         double logger_end = get_time_us_no_sync();
-        double total_overhead = from_stack.logger_overhead_us + (logger_end - logger_start);
+        double total_overhead = from_stack.logger_overhead_us + from_stack.child_overhead_us + (logger_end - logger_start);
         
 #if ROCSOLVER_USE_ASYNC_LOGGER
         // store HIP event pair for later to compute time at log_end_impl.
         from_profile.events.push_back({from_stack.start_evt, from_stack.stop_evt});
-        // accumulate logger overhead for async mode
+        // accumulate total logger overhead (own + children) for async mode
         from_profile.total_logger_overhead += total_overhead;
 #else
-        // For sync mode: subtract overhead from elapsed time before accumulating
+        // For sync mode: subtract total overhead (own + children) from elapsed time
         double corrected_time = elapsed_time - total_overhead;
         from_profile.total_time += corrected_time;
         from_profile.total_logger_overhead += total_overhead;
