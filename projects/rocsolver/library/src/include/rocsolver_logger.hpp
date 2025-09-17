@@ -375,6 +375,9 @@ public:
                              const char* func_name,
                              Ts... args)
     {
+        // Start timing total template function overhead
+        double template_start = get_time_us_no_sync();
+        
         auto lock = acquire_lock();
         auto entry = push_log_entry(handle, get_func_name<T>(func_prefix, func_name));
         bool bench_enabled = layer_mode & rocblas_layer_mode_log_bench;
@@ -387,12 +390,19 @@ public:
 
         if(trace_enabled)
             trace_str += fmt::format("------- ENTER {} trace tree -------\n", entry.name);
+            
+        // End timing and add template function overhead to current log entry
+        double template_end = get_time_us_no_sync();
+        entry.logger_overhead_us += (template_end - template_start);
     }
 
     // logging function to be called before exiting a top-level (i.e. impl) function
     template <typename T>
     void log_exit_top_level(rocblas_handle handle)
     {
+        // Start timing total template function overhead
+        double template_start = get_time_us_no_sync();
+        
         auto lock = acquire_lock();
         auto entry = pop_log_entry(handle);
         bool trace_enabled = layer_mode & rocblas_layer_mode_log_trace;
@@ -406,12 +416,19 @@ public:
             trace_str.clear();
             trace_os->flush();
         }
+        
+        // End timing and add template function overhead to the popped log entry
+        double template_end = get_time_us_no_sync();
+        entry.logger_overhead_us += (template_end - template_start);
     }
 
     // logging function to be called upon entering a sub-level (i.e. template) function
     template <typename T, typename... Ts>
     void log_enter(rocblas_handle handle, const char* func_prefix, const char* func_name, Ts... args)
     {
+        // Start timing total template function overhead
+        double template_start = get_time_us_no_sync();
+        
         auto lock = acquire_lock();
         auto entry = push_log_entry(handle, get_template_name(func_prefix, func_name));
         bool trace_enabled = layer_mode & rocblas_layer_mode_log_trace && entry.level <= max_levels;
@@ -419,16 +436,27 @@ public:
 
         if(trace_enabled)
             log_trace<T>(entry.level, func_prefix, func_name, rocsolver_make_logvalue(args)...);
+            
+        // End timing and add template function overhead to current log entry
+        double template_end = get_time_us_no_sync();
+        entry.logger_overhead_us += (template_end - template_start);
     }
 
     // logging function to be called before exiting a sub-level (i.e. template) function
     template <typename T>
     void log_exit(rocblas_handle handle)
     {
+        // Start timing total template function overhead
+        double template_start = get_time_us_no_sync();
+        
         auto lock = acquire_lock();
         auto entry = pop_log_entry(handle);
         bool profile_enabled = layer_mode & rocblas_layer_mode_log_profile;
         lock.unlock();
+
+        // End timing and add template function overhead to the popped log entry
+        double template_end = get_time_us_no_sync();
+        entry.logger_overhead_us += (template_end - template_start);
 
         if(profile_enabled)
             log_profile<T>(handle, entry);

@@ -137,7 +137,7 @@ rocsolver_log_entry rocsolver_logger::pop_log_entry(rocblas_handle handle)
 {
     // Start timing logger overhead
     double logger_start = get_time_us_no_sync();
-    
+
     std::vector<rocsolver_log_entry>& stack = call_stack[handle];
     rocsolver_log_entry result = stack.back();
 
@@ -151,7 +151,7 @@ rocsolver_log_entry rocsolver_logger::pop_log_entry(rocblas_handle handle)
     // For synchronous logger, no additional timing work needed here
 
     stack.pop_back();
-    
+
     if(stack.empty())
         call_stack.erase(handle);
 
@@ -163,7 +163,7 @@ rocsolver_log_entry rocsolver_logger::pop_log_entry(rocblas_handle handle)
     {
         // Calculate total overhead of the function being popped (own + children)
         double total_child_overhead = result.logger_overhead_us + result.child_overhead_us;
-        
+
         // Add to parent's child overhead accumulator
         stack.back().child_overhead_us += total_child_overhead + (logger_end - logger_start);
     }
