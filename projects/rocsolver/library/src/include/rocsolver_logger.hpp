@@ -68,55 +68,70 @@ ROCSOLVER_BEGIN_NAMESPACE
     std::unique_ptr<rocsolver_logger::scope_guard<T>> _log_token;                           \
     do                                                                                      \
     {                                                                                       \
+        double start_time = get_time_us_no_sync();                                                     \
         if(rocsolver_logger::is_logging_enabled())                                          \
         {                                                                                   \
             rocsolver_logger::instance()->log_enter_top_level<T>(handle, "rocsolver", name, \
                                                                  __VA_ARGS__);              \
             _log_token = std::make_unique<rocsolver_logger::scope_guard<T>>(true, handle);  \
+            _log_token->macro_overhead_us += get_time_us_no_sync() - start_time;                                   \
         }                                                                                   \
     } while(0)
 #define ROCSOLVER_ENTER(name, ...)                                                              \
     std::unique_ptr<rocsolver_logger::scope_guard<T>> _log_token;                               \
     do                                                                                          \
     {                                                                                           \
+        double start_time = get_time_us_no_sync();                                                     \
         if(rocsolver_logger::is_logging_enabled())                                              \
         {                                                                                       \
             rocsolver_logger::instance()->log_enter<T>(handle, "rocsolver", name, __VA_ARGS__); \
             _log_token = std::make_unique<rocsolver_logger::scope_guard<T>>(false, handle);     \
+            _log_token->macro_overhead_us += get_time_us_no_sync() - start_time;                                   \
         }                                                                                       \
     } while(0)
 #define ROCBLAS_ENTER(name, ...)                                                              \
     std::unique_ptr<rocsolver_logger::scope_guard<T>> _log_token;                             \
     do                                                                                        \
     {                                                                                         \
+        double start_time = get_time_us_no_sync();                                                     \
         if(rocsolver_logger::is_logging_enabled())                                            \
         {                                                                                     \
             rocsolver_logger::instance()->log_enter<T>(handle, "rocblas", name, __VA_ARGS__); \
             _log_token = std::make_unique<rocsolver_logger::scope_guard<T>>(false, handle);   \
+            _log_token->macro_overhead_us += get_time_us_no_sync() - start_time;                                   \
         }                                                                                     \
     } while(0)
-#if ROCSOLVER_USE_ASYNC_LOGGER
-#define ROCSOLVER_LAUNCH_KERNEL(name, ...) \
-    do { \
-        if (rocsolver_logger::is_logging_enabled() && rocsolver_logger::is_kernel_logging_enabled()) \
-            rocsolver_logger::instance()->log_enter<T>(handle, nullptr, #name); \
-        hipLaunchKernelGGL((name), __VA_ARGS__); \
-        if (rocsolver_logger::is_logging_enabled() && rocsolver_logger::is_kernel_logging_enabled()) \
-            rocsolver_logger::instance()->log_exit<T>(handle); \
-    } while(0)
-#else
+// #if ROCSOLVER_USE_ASYNC_LOGGER
+// #define ROCSOLVER_LAUNCH_KERNEL(name, ...) \
+//     do { \
+//         double total_time=0; \
+//         double start_time = get_time_us_no_sync(); \
+//         if (rocsolver_logger::is_logging_enabled() && rocsolver_logger::is_kernel_logging_enabled()) \
+//             rocsolver_logger::instance()->log_enter<T>(handle, nullptr, #name); \
+//         total_time += get_time_us_no_sync() - start_time; \
+//          \
+//          start_time = get_time_us_no_sync(); \
+//         hipLaunchKernelGGL((name), __VA_ARGS__); \
+//         if (rocsolver_logger::is_logging_enabled() && rocsolver_logger::is_kernel_logging_enabled()) \
+//             rocsolver_logger::instance()->log_exit<T>(handle); \
+//         total_time += get_time_us_no_sync() - start_time; \
+//         // printf("Kernel %s total time %f us\n", #name, total_time); \
+//     } while(0)
+// #else
 #define ROCSOLVER_LAUNCH_KERNEL(name, ...)                                                          \
     do                                                                                              \
     {                                                                                               \
+        double start_time = get_time_us_no_sync();                                                     \
         std::unique_ptr<rocsolver_logger::scope_guard<T>> _kernel_log_token;                        \
         if(rocsolver_logger::is_logging_enabled() && rocsolver_logger::is_kernel_logging_enabled()) \
         {                                                                                           \
             rocsolver_logger::instance()->log_enter<T>(handle, nullptr, #name);                     \
             _kernel_log_token = std::make_unique<rocsolver_logger::scope_guard<T>>(false, handle);  \
+            _kernel_log_token->macro_overhead_us += get_time_us_no_sync() - start_time;                                   \
         }                                                                                           \
         hipLaunchKernelGGL((name), __VA_ARGS__);                                                    \
     } while(0)
-#endif
+// #endif
 
 /***************************************************************************
  * The rocsolver_log_entry struct records function data for trace and
@@ -298,17 +313,8 @@ private:
 
     // populates profile logging data with information from call_stack
     template <typename T>
-    void log_profile(rocblas_handle handle, rocsolver_log_entry& from_stack)
+    rocsolver_profile_entry& log_profile(rocblas_handle handle, rocsolver_log_entry& from_stack)
     {
-        // Start timing logger overhead for this function
-        double logger_start = get_time_us_no_sync();
-        
-#if !ROCSOLVER_USE_ASYNC_LOGGER
-        hipStream_t stream;
-        rocblas_get_stream(handle, &stream);
-        double elapsed_time = get_time_us_sync(stream) - from_stack.start_time;
-#endif
-        const std::lock_guard<std::mutex> lock(rocsolver_logger::_mutex);
 
         rocsolver_profile_map* map = &profile;
         for (const std::string& caller_name : from_stack.callers) {
@@ -323,21 +329,12 @@ private:
         from_profile.level = from_stack.level;
         from_profile.calls++;
         
-        // End timing logger overhead and calculate total overhead (own + children)
-        double logger_end = get_time_us_no_sync();
-        double total_overhead = from_stack.logger_overhead_us + from_stack.child_overhead_us + (logger_end - logger_start);
-        
 #if ROCSOLVER_USE_ASYNC_LOGGER
         // store HIP event pair for later to compute time at log_end_impl.
         from_profile.events.push_back({from_stack.start_evt, from_stack.stop_evt});
-        // accumulate total logger overhead (own + children) for async mode
-        from_profile.total_logger_overhead += total_overhead;
-#else
-        // For sync mode: subtract total overhead (own + children) from elapsed time
-        double corrected_time = elapsed_time - total_overhead;
-        from_profile.total_time += corrected_time;
-        from_profile.total_logger_overhead += total_overhead;
 #endif
+        
+        return from_profile;
     }
 
     static std::unique_lock<std::mutex> acquire_lock()
@@ -379,10 +376,9 @@ public:
         double template_start = get_time_us_no_sync();
         
         auto lock = acquire_lock();
-        auto entry = push_log_entry(handle, get_func_name<T>(func_prefix, func_name));
+        rocsolver_log_entry& entry = push_log_entry(handle, get_func_name<T>(func_prefix, func_name));
         bool bench_enabled = layer_mode & rocblas_layer_mode_log_bench;
         bool trace_enabled = layer_mode & rocblas_layer_mode_log_trace;
-        lock.unlock();
         ROCSOLVER_ASSUME(entry.level == 0);
 
         if(bench_enabled)
@@ -391,22 +387,28 @@ public:
         if(trace_enabled)
             trace_str += fmt::format("------- ENTER {} trace tree -------\n", entry.name);
             
-        // End timing and add template function overhead to current log entry
+        // End timing within lock to capture all overhead including final lock operations
+        
+        lock.unlock();
+
         double template_end = get_time_us_no_sync();
         entry.logger_overhead_us += (template_end - template_start);
     }
 
     // logging function to be called before exiting a top-level (i.e. impl) function
     template <typename T>
-    void log_exit_top_level(rocblas_handle handle)
+    void log_exit_top_level(rocblas_handle handle, double macro_overhead_us)
     {
         // Start timing total template function overhead
         double template_start = get_time_us_no_sync();
         
         auto lock = acquire_lock();
-        auto entry = pop_log_entry(handle);
+        
+        // Check if there's a parent before popping
+        bool has_parent = call_stack[handle].size() > 1;
+        
+        rocsolver_log_entry entry = pop_log_entry(handle);
         bool trace_enabled = layer_mode & rocblas_layer_mode_log_trace;
-        lock.unlock();
         ROCSOLVER_ASSUME(entry.level == 0);
 
         if(trace_enabled)
@@ -417,9 +419,29 @@ public:
             trace_os->flush();
         }
         
-        // End timing and add template function overhead to the popped log entry
+        
+        // Propagate child overhead to parent if it exists
+        rocsolver_log_entry* parent_entry;
+        if(has_parent)
+        {
+            // Calculate total overhead of this function (own + children)
+            auto it = call_stack.find(handle);
+            if(it != call_stack.end() && !it->second.empty())
+            {
+                parent_entry = &it->second.back();
+                // it->second.back().child_overhead_us += total_overhead;
+            }
+        }
+        
+        lock.unlock();
+
+        // End timing within lock to capture all overhead
         double template_end = get_time_us_no_sync();
-        entry.logger_overhead_us += (template_end - template_start);
+        entry.logger_overhead_us += (template_end - template_start) + macro_overhead_us;
+        double total_overhead = entry.logger_overhead_us + entry.child_overhead_us + macro_overhead_us;
+        if(has_parent)
+            parent_entry->child_overhead_us += (total_overhead);
+        
     }
 
     // logging function to be called upon entering a sub-level (i.e. template) function
@@ -430,36 +452,93 @@ public:
         double template_start = get_time_us_no_sync();
         
         auto lock = acquire_lock();
-        auto entry = push_log_entry(handle, get_template_name(func_prefix, func_name));
+        rocsolver_log_entry& entry = push_log_entry(handle, get_template_name(func_prefix, func_name));
         bool trace_enabled = layer_mode & rocblas_layer_mode_log_trace && entry.level <= max_levels;
-        lock.unlock();
 
         if(trace_enabled)
             log_trace<T>(entry.level, func_prefix, func_name, rocsolver_make_logvalue(args)...);
             
-        // End timing and add template function overhead to current log entry
+        
+        lock.unlock();
+
+        // End timing within lock to capture all overhead
         double template_end = get_time_us_no_sync();
         entry.logger_overhead_us += (template_end - template_start);
     }
 
     // logging function to be called before exiting a sub-level (i.e. template) function
     template <typename T>
-    void log_exit(rocblas_handle handle)
+    void log_exit(rocblas_handle handle, double macro_overhead_us)
     {
         // Start timing total template function overhead
         double template_start = get_time_us_no_sync();
         
         auto lock = acquire_lock();
-        auto entry = pop_log_entry(handle);
+        
+        // Check if there's a parent before popping
+        bool has_parent = call_stack[handle].size() > 1;
+        if (!has_parent){
+            printf("no parent on log_exit\n");
+        }
+        
+        rocsolver_log_entry entry = pop_log_entry(handle);
         bool profile_enabled = layer_mode & rocblas_layer_mode_log_profile;
+        
+#if !ROCSOLVER_USE_ASYNC_LOGGER
+        // For sync mode, calculate elapsed time before profile operations
+        hipStream_t stream;
+        rocblas_get_stream(handle, &stream);
+        double elapsed_time = get_time_us_sync(stream) - entry.start_time;
+#endif
+
+        // Call log_profile while still under lock
+        rocsolver_profile_entry* profile_entry = nullptr;
+        if(profile_enabled)
+        {
+            profile_entry = &log_profile<T>(handle, entry);
+        }
+
+        
+        // Propagate child overhead to parent if it exists
+        rocsolver_log_entry* parent_entry;
+        if(has_parent)
+        {
+            auto it = call_stack.find(handle);
+            if(it != call_stack.end() && !it->second.empty())
+            {
+                parent_entry = &it->second.back();
+                // it->second.back().child_overhead_us += total_overhead;
+            } else{
+                printf("no parent to propagate to\n");
+            }
+        }
+        
         lock.unlock();
 
-        // End timing and add template function overhead to the popped log entry
-        double template_end = get_time_us_no_sync();
-        entry.logger_overhead_us += (template_end - template_start);
 
-        if(profile_enabled)
-            log_profile<T>(handle, entry);
+        // End timing within lock to capture all overhead including log_profile
+        double template_end = get_time_us_no_sync();
+        entry.logger_overhead_us += (template_end - template_start) + macro_overhead_us;
+        
+        // Calculate total overhead (own + children)
+        double total_overhead = entry.logger_overhead_us + entry.child_overhead_us + macro_overhead_us;
+        
+        // Set the overhead in the profile entry
+        if(profile_entry)
+        {
+#if ROCSOLVER_USE_ASYNC_LOGGER
+            // For async mode, accumulate total overhead
+            profile_entry->total_logger_overhead += total_overhead;
+#else
+            // For sync mode, add corrected time and track overhead
+            double corrected_time = elapsed_time - total_overhead;
+            profile_entry->total_time += corrected_time;
+            profile_entry->total_logger_overhead += total_overhead;
+#endif
+        }
+
+        if(has_parent)
+            parent_entry->child_overhead_us += (total_overhead);
     }
 
     /***************************************************************************
@@ -471,6 +550,7 @@ public:
     {
         bool top_level;
         rocblas_handle handle;
+        double macro_overhead_us = 0;
 
         // Constructor
         scope_guard(bool top_level, rocblas_handle handle)
@@ -486,9 +566,9 @@ public:
         ~scope_guard()
         {
             if(top_level)
-                rocsolver_logger::instance()->log_exit_top_level<T>(handle);
+                rocsolver_logger::instance()->log_exit_top_level<T>(handle, macro_overhead_us);
             else
-                rocsolver_logger::instance()->log_exit<T>(handle);
+                rocsolver_logger::instance()->log_exit<T>(handle, macro_overhead_us);
         }
 
         // Assignment operator is deleted

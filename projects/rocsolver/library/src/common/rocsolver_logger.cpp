@@ -95,9 +95,6 @@ std::ostream* rocsolver_logger::open_log_stream(const char* environment_variable
 
 rocsolver_log_entry& rocsolver_logger::push_log_entry(rocblas_handle handle, std::string&& name)
 {
-    // Start timing logger overhead
-    double logger_start = get_time_us_no_sync();
-
     std::vector<rocsolver_log_entry>& stack = call_stack[handle];
     stack.push_back(rocsolver_log_entry());
 
@@ -119,10 +116,6 @@ rocsolver_log_entry& rocsolver_logger::push_log_entry(rocblas_handle handle, std
     for(int i = 1; i < stack.size() - 1; i++)
         result.callers.push_back(stack[i].name);
 
-    // End timing logger overhead and accumulate it
-    double logger_end = get_time_us_no_sync();
-    result.logger_overhead_us += (logger_end - logger_start);
-
     return result;
 }
 
@@ -135,9 +128,6 @@ rocsolver_log_entry& rocsolver_logger::peek_log_entry(rocblas_handle handle)
 
 rocsolver_log_entry rocsolver_logger::pop_log_entry(rocblas_handle handle)
 {
-    // Start timing logger overhead
-    double logger_start = get_time_us_no_sync();
-
     std::vector<rocsolver_log_entry>& stack = call_stack[handle];
     rocsolver_log_entry result = stack.back();
 
@@ -152,20 +142,10 @@ rocsolver_log_entry rocsolver_logger::pop_log_entry(rocblas_handle handle)
 
     stack.pop_back();
 
-    if(stack.empty())
+    if(stack.empty()){
+        printf("call stack empty after pop\n");
         call_stack.erase(handle);
 
-    // End timing logger overhead and accumulate it
-    double logger_end = get_time_us_no_sync();
-    result.logger_overhead_us += (logger_end - logger_start);
-    // Propagate this function's total overhead to parent (if exists)
-    if(!stack.empty())
-    {
-        // Calculate total overhead of the function being popped (own + children)
-        double total_child_overhead = result.logger_overhead_us + result.child_overhead_us;
-
-        // Add to parent's child overhead accumulator
-        stack.back().child_overhead_us += total_child_overhead + (logger_end - logger_start);
     }
 
     return result;
@@ -179,6 +159,7 @@ void rocsolver_logger::append_profile(std::string& str,
                                       rocsolver_profile_map::iterator start,
                                       rocsolver_profile_map::iterator end)
 {
+    printf("enter append_profile\n");
     for(auto it = start; it != end; ++it)
     {
         rocsolver_profile_entry& entry = it->second;
@@ -187,8 +168,8 @@ void rocsolver_logger::append_profile(std::string& str,
         int indent_level = entry.level - 1;
         int indent = shift_width * indent_level;
 
-        str += fmt::format("{: <{}}{}: Calls: {}, Total Time: {:.3f} ms", "", indent, it->first,
-                           entry.calls, entry.total_time * 1e-3);
+        str += fmt::format("{: <{}}{}: Calls: {}, Total Time: {:.3f} ms, Overhead Time: {:.3f}", "", indent, it->first,
+                           entry.calls, entry.total_time * 1e-3, entry.total_logger_overhead * 1e-3);
 
         if(entry.internal_calls)
         {
@@ -257,14 +238,23 @@ rocblas_status rocsolver_log_end_impl()
     const std::lock_guard<std::mutex> lock(rocsolver_logger::_mutex);
 
     // if there is an active logger:
+    printf("enter log_end_impl\n");
     if(rocsolver_logger::_instance == nullptr)
         return rocblas_status_internal_error;
+    printf("logger instance exists\n");
 
     auto logger = rocsolver_logger::_instance;
 
     // if there are pending log_exit calls:
     if(!rocsolver_logger::_instance->call_stack.empty())
+    {
+        std::cout << rocsolver_logger::_instance->call_stack.size()
+                  << " pending log_exit calls detected" << std::endl;
+        for (auto& kv : rocsolver_logger::_instance->call_stack)
+            std::cout << "  handle " << " has " << kv.second.size() << " pending calls"
+                      << std::endl;
         return rocblas_status_internal_error;
+    }
 
 #if ROCSOLVER_USE_ASYNC_LOGGER
     // ONE device sync prior to time collection
