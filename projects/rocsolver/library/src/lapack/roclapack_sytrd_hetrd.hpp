@@ -36,6 +36,7 @@
 #include "rocblas.hpp"
 #include "roclapack_sytd2_hetd2.hpp"
 #include "rocsolver/rocsolver.h"
+#include <hip/hip_runtime.h>
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -207,6 +208,16 @@ rocblas_status rocsolver_sytrd_hetrd_template(rocblas_handle handle,
         j = 0;
         while(j < n - kk)
         {
+            hipEvent_t merge_events[2];
+            std::string event_names[1];
+            for(int i = 0; i < 2; i++)
+                HIP_CHECK(hipEventCreate(&merge_events[i]));
+
+            int num_events = 0;
+
+            HIP_CHECK(hipEventRecord(merge_events[num_events], stream));
+            event_names[num_events] = "latrd_forsytrd";
+            num_events++;
             // reduce columns j:j+k-1
             rocsolver_latrd_forsytrd_template<T>(handle, uplo, n - j, k, A,
                                                  shiftA + idx2D(j, j, lda), lda, strideA, (E + j),
@@ -215,6 +226,9 @@ rocblas_status rocsolver_sytrd_hetrd_template(rocblas_handle handle,
 
             // update trailing matrix
             // A = A - V*W' - W*V'
+            HIP_CHECK(hipEventRecord(merge_events[num_events], stream));
+            // event_names[num_events] = "gemm";
+            num_events++;
             rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_conjugate_transpose,
                            n - j - k, n - j - k, k, &minone, A, shiftA + idx2D(j + k, j, lda), lda,
                            strideA, tmptau_W, idx2D(k, 0, ldw), ldw, strideW, &one, A,
@@ -223,15 +237,51 @@ rocblas_status rocsolver_sytrd_hetrd_template(rocblas_handle handle,
                            n - j - k, n - j - k, k, &minone, tmptau_W, idx2D(k, 0, ldw), ldw,
                            strideW, A, shiftA + idx2D(j + k, j, lda), lda, strideA, &one, A,
                            shiftA + idx2D(j + k, j + k, lda), lda, strideA, batch_count, workArr);
+            // HIP_CHECK(hipEventRecord(merge_events[num_events], stream));
+            // num_events++;
+
+            HIP_CHECK(hipStreamSynchronize(stream));
+
+            if(true)
+            {
+                for(int i = 0; i < num_events - 1; i++)
+                {
+                    float elapsed_time = 0;
+                    HIP_CHECK(
+                        hipEventElapsedTime(&elapsed_time, merge_events[i], merge_events[i + 1]));
+
+                    printf("\t%-41s: %f\n", event_names[i].c_str(), elapsed_time);
+                }
+                fflush(stdout);
+            }
+            for(int i = 0; i < 2; i++)
+                HIP_CHECK(hipEventDestroy(merge_events[i]));
 
             j += k;
         }
 
+        hipEvent_t final_events[2];
+        for(int i = 0; i < 3; i++)
+            HIP_CHECK(hipEventCreate(&final_events[i]));
+
+        HIP_CHECK(hipEventRecord(final_events[0], stream));
         // reduce last columns of A
         rocsolver_sytd2_hetd2_template<T>(handle, uplo, n - j, A, shiftA + idx2D(j, j, lda), lda,
                                           strideA, (D + j), strideD, (E + j), strideE, (tau + j),
                                           strideP, batch_count, scalars, work, norms, tmptau_W,
                                           workArr);
+        HIP_CHECK(hipEventRecord(final_events[1], stream));
+
+        HIP_CHECK(hipStreamSynchronize(stream));
+
+        float elapsed_time = 0;
+        HIP_CHECK(
+            hipEventElapsedTime(&elapsed_time, final_events[0], final_events[1]));
+
+        printf("\t%-41s: %f\n", "sytd2_template", elapsed_time);
+
+        for(int i = 0; i < 2; i++)
+            HIP_CHECK(hipEventDestroy(final_events[i]));
     }
 
     else

@@ -2018,8 +2018,16 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
         // main loop running forwards (for each column)
         for(rocblas_int j = 0; j < k; ++j)
         {
+            hipEvent_t merge_events[6];
+            std::string event_names[5];
+            for(int i = 0; i < 6; i++)
+                HIP_CHECK(hipEventCreate(&merge_events[i]));
+            int num_events = 0;
             // update column j of A with reflector computed in step j-1
             //----------------------------------------------------------
+            HIP_CHECK(hipEventRecord(merge_events[num_events], stream));
+            event_names[num_events] = "latrd_lower_updateA_kernel";
+            num_events++;
             ROCSOLVER_LAUNCH_KERNEL(latrd_lower_updateA_kernel<T>,
                                     dim3(grr_updates, grc_updates, batch_count),
                                     dim3(thr_updates, thc_updates, 1), lmemsize_updates, stream, n,
@@ -2029,6 +2037,9 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
             // reduce column j of A with new reflector, then copy off-diagonal element
             // to E(j) and set off-diagonal to 1
             //----------------------------------------------------------
+            HIP_CHECK(hipEventRecord(merge_events[num_events], stream));
+            event_names[num_events] = "rocsolver_larfg_template";
+            num_events++;
             rocsolver_larfg_template(handle, n - j - 1, A, shiftA + idx2D(j + 1, j, lda), E, j,
                                      strideE, A, shiftA + idx2D(std::min(j + 2, n - 1), j, lda), 1,
                                      strideA, (tau + j), strideP, batch_count, work, norms);
@@ -2039,6 +2050,9 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
             static constexpr int NB = 256;
             dim3 gemvt_grid(n + j, 1, batch_count);
             dim3 gemvt_threads(NB);
+            HIP_CHECK(hipEventRecord(merge_events[num_events], stream));
+            event_names[num_events] = "latrd_lower_computeW_gemvt_kernel";
+            num_events++;
             ROCSOLVER_LAUNCH_KERNEL((latrd_lower_computeW_gemvt_kernel<NB, T>), gemvt_grid,
                                     gemvt_threads, 0, stream, n, j, A, shiftA, lda, strideA, W,
                                     shiftW, ldw, strideW, W, shiftW + idx2D(0, j, ldw), ldw,
@@ -2046,16 +2060,42 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
 
             // update column j of W
             //--------------------------------------------------------------
+            HIP_CHECK(hipEventRecord(merge_events[num_events], stream));
+            event_names[num_events] = "latrd_lower_updateW_kernel";
+            num_events++;
             ROCSOLVER_LAUNCH_KERNEL(
                 latrd_lower_updateW_kernel<T>, dim3(grr_updates, grc_updates, batch_count),
                 dim3(thr_updates, thc_updates, 1), lmemsize_updates, stream, n, j, A, shiftA, lda,
                 strideA, W, shiftW, ldw, strideW, work, strideblk, tau, strideP);
 
+            HIP_CHECK(hipEventRecord(merge_events[num_events], stream));
+            event_names[num_events] = "latrd_dot_scale_axpy";
+            num_events++;
             ROCSOLVER_LAUNCH_KERNEL((latrd_dot_scale_axpy<1024, T>), dim3(1, 1, batch_count),
                                     dim3(1024, 1, 1), 0, stream, n - 1 - j, A,
                                     shiftA + idx2D(j + 1, j, lda), strideA, W,
                                     shiftW + idx2D(j + 1, j, ldw), strideW, tau + j, strideP);
             //--------------------------------------------------------------
+
+            HIP_CHECK(hipEventRecord(merge_events[num_events], stream));
+            num_events++;
+
+            HIP_CHECK(hipStreamSynchronize(stream));
+
+            if(true)
+            {
+                for(int i = 0; i < num_events - 1; i++)
+                {
+                    float elapsed_time = 0;
+                    HIP_CHECK(
+                        hipEventElapsedTime(&elapsed_time, merge_events[i], merge_events[i + 1]));
+
+                    printf("\t%-41s: %f\n", event_names[i].c_str(), elapsed_time);
+                }
+                fflush(stdout);
+            }
+            for(int i = 0; i < 6; i++)
+                HIP_CHECK(hipEventDestroy(merge_events[i]));
         }
     }
 
