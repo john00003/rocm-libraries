@@ -2079,6 +2079,9 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
                                     dim3(n, batch_count), dim3(STEDC_BDIM), 0, stream, k, n, V, 0,
                                     ldv, strideV, tmpz, tempgemm, splits);
 
+            // instrument with hipEvents
+            hipEvent_t gemm_start, gemm_end;
+            rocblas_int m_gemm, n_gemm, k_gemm;
             if(STEDC_EXTERNAL_GEMM)
             {
                 // using external gemms with padded matrices to do the vector update
@@ -2088,6 +2091,11 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
                 // external gemm based updates.
                 if(n <= 1024 || batch_count > 1)
                 {
+                    hipEventCreate(&gemm_start);
+                    hipEventRecord(gemm_start, stream);
+                    m_gemm = n;
+                    n_gemm = n;
+                    k_gemm = n;
                     rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_none, n, n, n,
                                    &one, V, 0, ldv, strideV, ptr_etmpd(n, tempgemm), 0, n,
                                    get_tempgemm_size(n), &zero, ptr_vecs(n, tempgemm), 0, n,
@@ -2100,6 +2108,11 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
                     if(n % n_merges == 0)
                     {
                         int sz = n / n_merges;
+                        hipEventCreate(&gemm_start);
+                        hipEventRecord(gemm_start, stream);
+                        m_gemm = sz;
+                        n_gemm = sz;
+                        k_gemm = sz;
                         rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_none, sz,
                                        sz, sz, &one, V, 0, ldv, sz * ldv + sz,
                                        ptr_etmpd(n, tempgemm), 0, n, sz * n + sz, &zero,
@@ -2139,6 +2152,11 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
                             }
                             HIP_CHECK(hipMemcpyAsync(workArr, hABC.data(), 3 * nbb * sizeof(S*),
                                                      hipMemcpyHostToDevice, stream));
+                            hipEventCreate(&gemm_start);
+                            hipEventRecord(gemm_start, stream);
+                            m_gemm = nsb;
+                            n_gemm = nsb;
+                            k_gemm = nsb;
                             rocsolver_gemm<S, rocblas_int, S* const*, S* const*, S* const*>(
                                 handle, rocblas_operation_none, rocblas_operation_none, nsb, nsb,
                                 nsb, &one, workArr, 0, ldv, 0, workArr + nbb, 0, n, 0, &zero,
@@ -2147,6 +2165,17 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
                     }
                 }
             }
+
+
+            hipEventCreate(&gemm_end);
+            hipEventRecord(gemm_end, stream);
+            hipEventSynchronize(gemm_end);
+            float milliseconds = 0;
+            hipEventElapsedTime(&milliseconds, gemm_start, gemm_end);
+            printf("GEMM time for size (%d, %d, %d): %f ms\n", m_gemm, n_gemm, k_gemm, milliseconds);
+            hipEventDestroy(gemm_start);
+            hipEventDestroy(gemm_end);  
+
 
             // d. update level
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergeUpdate_kernel<S>), dim3(n, batch_count),
