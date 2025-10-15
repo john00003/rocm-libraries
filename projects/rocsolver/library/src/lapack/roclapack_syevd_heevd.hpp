@@ -337,10 +337,16 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
 
     // TODO: Scale the matrix
 
+    hipEvent_t syevd_events[4];
+    for(int i = 0; i < 4; i++)
+        HIP_CHECK(hipEventCreate(&syevd_events[i]));
+
     // reduce A to tridiagonal form
+    HIP_CHECK(hipEventRecord(syevd_events[0], stream));
     rocsolver_sytrd_hetrd_template<BATCHED>(handle, uplo, n, A, shiftA, lda, strideA, D, strideD, E,
                                             strideE, tau, n, batch_count, scalars, (T*)work1,
                                             (T*)work2, tmptau_W, workArr, false);
+    HIP_CHECK(hipEventRecord(syevd_events[1], stream));
 
     if(sterf_mode == rocsolver_alg_mode_hybrid && evect != rocblas_evect_original)
     {
@@ -358,6 +364,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
         rocsolver_stedc_template<false, ISBATCHED, T>(
             handle, rocblas_evect_tridiagonal, n, D, 0, strideD, E, 0, strideE, tmptau_W, 0, ldw,
             strideW, info, batch_count, work3, (S*)work2, (S*)work1, tmpz, splits, (S**)workArr);
+        HIP_CHECK(hipEventRecord(syevd_events[2], stream));
 
         // update the eigenvectors (if applicable)
         if(evect == rocblas_evect_original)
@@ -366,6 +373,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                 handle, rocblas_side_left, uplo, rocblas_operation_none, n, n, A, shiftA, lda,
                 strideA, tau, n, tmptau_W, 0, ldw, strideW, batch_count, scalars, (T*)work2, tmpz,
                 splits, work4, (T*)work1, (T*)work3, workArr, optim_mem);
+            HIP_CHECK(hipEventRecord(syevd_events[3], stream));
 
             // copy matrix product into A
             const rocblas_int copyblocks = (n - 1) / BS2 + 1;
@@ -373,7 +381,30 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                                     dim3(BS2, BS2), 0, stream, n, n, tmptau_W, 0, ldw, strideW, A,
                                     shiftA, lda, strideA);
         }
+        else
+        {
+            HIP_CHECK(hipEventRecord(syevd_events[3], stream));
+        }
     }
+
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    if(rocsolver_profile_messages)
+    {
+        float elapsed_sytrd, elapsed_stedc, elapsed_ormtr;
+        HIP_CHECK(hipEventElapsedTime(&elapsed_sytrd, syevd_events[0], syevd_events[1]));
+        HIP_CHECK(hipEventElapsedTime(&elapsed_stedc, syevd_events[1], syevd_events[2]));
+        HIP_CHECK(hipEventElapsedTime(&elapsed_ormtr, syevd_events[2], syevd_events[3]));
+
+        printf("SYEVD Kernel Timings:\n"
+               "\trocsolver_sytrd_hetrd_template: %f\n"
+               "\trocsolver_stedc_template      : %f\n"
+               "\trocsolver_ormtr_unmtr_template: %f\n",
+               elapsed_sytrd, elapsed_stedc, elapsed_ormtr);
+    }
+
+    for(int i = 0; i < 4; i++)
+        HIP_CHECK(hipEventDestroy(syevd_events[i]));
 
     return rocblas_status_success;
 }
@@ -472,10 +503,16 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
 
     // TODO: Scale the matrix
 
+    hipEvent_t syevd_events[4];
+    for(int i = 0; i < 4; i++)
+        HIP_CHECK(hipEventCreate(&syevd_events[i]));
+
     // reduce A to tridiagonal form
+    HIP_CHECK(hipEventRecord(syevd_events[0], stream));
     rocsolver_sytrd_hetrd_template<BATCHED>(handle, uplo, n, A, shiftA, lda, strideA, D, strideD, E,
                                             strideE, tau, n, batch_count, scalars, (T*)work1,
                                             (T*)work2, tmptau_W, workArr, false);
+    HIP_CHECK(hipEventRecord(syevd_events[1], stream));
 
     if(sterf_mode == rocsolver_alg_mode_hybrid && evect != rocblas_evect_original)
     {
@@ -493,6 +530,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
         rocsolver_stedc_template<false, ISBATCHED, T>(
             handle, rocblas_evect_tridiagonal, n, D, 0, strideD, E, 0, strideE, tmptau_W, 0, ldw,
             strideW, info, batch_count, work3, (S*)work2, (S*)work1, tmpz, splits, (S**)workArr);
+        HIP_CHECK(hipEventRecord(syevd_events[2], stream));
 
         // update the eigenvectors (if applicable)
         if(evect == rocblas_evect_original)
@@ -501,6 +539,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                 handle, rocblas_side_left, uplo, rocblas_operation_none, n, n, A, shiftA, lda,
                 strideA, tau, n, tmptau_W, 0, ldw, strideW, batch_count, scalars, (T*)work2, tmpz,
                 splits, work4, (T*)work1, (T*)work3, workArr, optim_mem);
+            HIP_CHECK(hipEventRecord(syevd_events[3], stream));
 
             // copy matrix product into A
             const rocblas_int copyblocks = (n - 1) / BS2 + 1;
@@ -508,7 +547,30 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                                     dim3(BS2, BS2), 0, stream, n, n, tmptau_W, 0, ldw, strideW, A,
                                     shiftA, lda, strideA);
         }
+        else
+        {
+            HIP_CHECK(hipEventRecord(syevd_events[3], stream));
+        }
     }
+
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    if(rocsolver_profile_messages)
+    {
+        float elapsed_sytrd, elapsed_stedc, elapsed_ormtr;
+        HIP_CHECK(hipEventElapsedTime(&elapsed_sytrd, syevd_events[0], syevd_events[1]));
+        HIP_CHECK(hipEventElapsedTime(&elapsed_stedc, syevd_events[1], syevd_events[2]));
+        HIP_CHECK(hipEventElapsedTime(&elapsed_ormtr, syevd_events[2], syevd_events[3]));
+
+        printf("SYEVD Kernel Timings:\n"
+               "\trocsolver_sytrd_hetrd_template: %f\n"
+               "\trocsolver_stedc_template      : %f\n"
+               "\trocsolver_ormtr_unmtr_template: %f\n",
+               elapsed_sytrd, elapsed_stedc, elapsed_ormtr);
+    }
+
+    for(int i = 0; i < 4; i++)
+        HIP_CHECK(hipEventDestroy(syevd_events[i]));
 
     return rocblas_status_success;
 }
