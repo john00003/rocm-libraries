@@ -371,8 +371,8 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
         {
             rocsolver_ormtr_unmtr_template<BATCHED, STRIDED>(
                 handle, rocblas_side_left, uplo, rocblas_operation_none, n, n, A, shiftA, lda,
-                strideA, tau, n, tmptau_W, 0, ldw, strideW, batch_count, scalars, (T*)work2, tmpz,
-                splits, work4, (T*)work1, (T*)work3, workArr, optim_mem);
+		strideA, tau, n, tmptau_W, 0, ldw, strideW, batch_count, scalars, (T*)work2,
+                (T*)work1, (T*)work3, workArr);
             HIP_CHECK(hipEventRecord(syevd_events[3], stream));
 
             // copy matrix product into A
