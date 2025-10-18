@@ -2026,6 +2026,7 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
             int num_events = 0;
             if (rocsolver_latrd_profile_messages)
             {
+                printf("LATRD kernel timings: \n")
                 for(int i = 0; i < 6; i++)
                     HIP_CHECK(hipEventCreate(&merge_events[i]));
                 HIP_CHECK(hipEventRecord(merge_events[num_events], stream));
