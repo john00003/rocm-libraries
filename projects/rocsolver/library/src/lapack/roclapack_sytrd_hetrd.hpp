@@ -211,14 +211,14 @@ rocblas_status rocsolver_sytrd_hetrd_template(rocblas_handle handle,
         j = 0;
         while(j < n - kk)
         {
+            hipEvent_t merge_events[3];
+            std::string event_names[2];
+            int num_events = 0;
             if (rocsolver_sytrd_profile_messages)
             {
-                hipEvent_t merge_events[3];
-                std::string event_names[2];
                 for(int i = 0; i < 3; i++)
                     HIP_CHECK(hipEventCreate(&merge_events[i]));
 
-                int num_events = 0;
 
                 HIP_CHECK(hipEventRecord(merge_events[num_events], stream));
                 event_names[num_events] = "latrd_forsytrd";
@@ -273,9 +273,9 @@ rocblas_status rocsolver_sytrd_hetrd_template(rocblas_handle handle,
             j += k;
         }
 
+        hipEvent_t final_events[2];
         if (rocsolver_sytrd_profile_messages)
         {
-            hipEvent_t final_events[2];
             for(int i = 0; i < 3; i++)
                 HIP_CHECK(hipEventCreate(&final_events[i]));
 
@@ -312,14 +312,14 @@ rocblas_status rocsolver_sytrd_hetrd_template(rocblas_handle handle,
         rocblas_int upkk = n - ((n - kk + k - 1) / k) * k;
         while(j >= upkk)
         {
+            hipEvent_t merge_events[3];
+            std::string event_names[2];
+            int num_events = 0;
             if (rocsolver_sytrd_profile_messages)
             {
-                hipEvent_t merge_events[3];
-                std::string event_names[2];
                 for(int i = 0; i < 3; i++)
                     HIP_CHECK(hipEventCreate(&merge_events[i]));
 
-                int num_events = 0;
 
                 HIP_CHECK(hipEventRecord(merge_events[num_events], stream));
                 event_names[num_events] = "latrd_forsytrd";
@@ -368,9 +368,9 @@ rocblas_status rocsolver_sytrd_hetrd_template(rocblas_handle handle,
             j -= k;
         }
 
+        hipEvent_t final_events[2];
         if (rocsolver_sytrd_profile_messages)
         {
-            hipEvent_t final_events[2];
             for(int i = 0; i < 2; i++)
                 HIP_CHECK(hipEventCreate(&final_events[i]));
 

@@ -337,7 +337,8 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
 
     // TODO: Scale the matrix
 
-    if (rocsolver_syevd_prfile_messages)
+    hipEvent_t syevd_events[4];
+    if (rocsolver_syevd_profile_messages)
     {
         for(int i = 0; i < 4; i++)
             HIP_CHECK(hipEventCreate(&syevd_events[i]));
@@ -349,7 +350,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
     rocsolver_sytrd_hetrd_template<BATCHED>(handle, uplo, n, A, shiftA, lda, strideA, D, strideD, E,
                                             strideE, tau, n, batch_count, scalars, (T*)work1,
                                             (T*)work2, tmptau_W, workArr, false);
-    if (rocsolver_syevd_prfile_messages)
+    if (rocsolver_syevd_profile_messages)
     {
         HIP_CHECK(hipEventRecord(syevd_events[1], stream));
     }
@@ -370,7 +371,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
         rocsolver_stedc_template<false, ISBATCHED, T>(
             handle, rocblas_evect_tridiagonal, n, D, 0, strideD, E, 0, strideE, tmptau_W, 0, ldw,
             strideW, info, batch_count, work3, (S*)work2, (S*)work1, tmpz, splits, (S**)workArr);
-        if (rocsolver_syevd_prfile_messages)
+        if (rocsolver_syevd_profile_messages)
         {
             HIP_CHECK(hipEventRecord(syevd_events[2], stream));
         }
@@ -382,7 +383,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                 handle, rocblas_side_left, uplo, rocblas_operation_none, n, n, A, shiftA, lda,
 		strideA, tau, n, tmptau_W, 0, ldw, strideW, batch_count, scalars, (T*)work2,
                 (T*)work1, (T*)work3, workArr);
-            if (rocsolver_syevd_prfile_messages)
+            if (rocsolver_syevd_profile_messages)
             {
                 HIP_CHECK(hipEventRecord(syevd_events[3], stream));
             }
@@ -395,14 +396,14 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
         }
         else
         {
-            if (rocsolver_syevd_prfile_messages)
+            if (rocsolver_syevd_profile_messages)
             {
                 HIP_CHECK(hipEventRecord(syevd_events[3], stream));
             }
         }
     }
 
-    if (rocsolver_syevd_prfile_messages)
+    if (rocsolver_syevd_profile_messages)
     {
         HIP_CHECK(hipStreamSynchronize(stream));
     }
@@ -422,7 +423,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
     }
 
 
-    if (rocsolver_syevd_prfile_messages)
+    if (rocsolver_syevd_profile_messages)
     {
         for(int i = 0; i < 4; i++)
             HIP_CHECK(hipEventDestroy(syevd_events[i]));

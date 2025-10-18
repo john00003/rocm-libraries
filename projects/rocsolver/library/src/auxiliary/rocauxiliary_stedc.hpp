@@ -1954,9 +1954,9 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
     // if no eigenvectors required with the classic solver, use sterf
     if(evect == rocblas_evect_none)
     {
+        hipEvent_t sterf_events[2];
         if (rocsolver_stedc_profile_messages)
         {
-            hipEvent_t sterf_events[2];
             for(int i = 0; i < 2; i++)
                 HIP_CHECK(hipEventCreate(&sterf_events[i]));
 
@@ -1983,9 +1983,9 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
     // if size is too small with classic solver, use steqr
     else if(n < STEDC_MIN_DC_SIZE)
     {
+        hipEvent_t steqr_events[2];
         if (rocsolver_stedc_profile_messages)
         {
-            hipEvent_t steqr_events[2];
             for(int i = 0; i < 2; i++)
                 HIP_CHECK(hipEventCreate(&steqr_events[i]));
 
@@ -2048,9 +2048,9 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
         }
         rocblas_int groupsn = (n - 1) / BS2 + 1;
 
+        hipEvent_t init_events[2];
         if (rocsolver_stedc_profile_messages)
         {
-            hipEvent_t init_events[2];
             for(int i = 0; i < 2; i++)
                 HIP_CHECK(hipEventCreate(&init_events[i]));
 
@@ -2067,9 +2067,9 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
         //-----------------------------
         rocblas_int groups = (batch_count - 1) / STEDC_BDIM + 1;
         
+        hipEvent_t divide_events[2];
         if (rocsolver_stedc_profile_messages)
         {
-            hipEvent_t divide_events[2];
             for(int i = 0; i < 2; i++)
                 HIP_CHECK(hipEventCreate(&divide_events[i]));
 
@@ -2085,9 +2085,9 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
 
         // 2. solve phase
         //-----------------------------
+        hipEvent_t solve_events[2];
         if (rocsolver_stedc_profile_messages)
         {
-            hipEvent_t solve_events[2];
             for(int i = 0; i < 2; i++)
                 HIP_CHECK(hipEventCreate(&solve_events[i]));
 
@@ -2125,16 +2125,16 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
         // launch merge for level k
         for(rocblas_int k = 0; k < levs; ++k)
         {
+            hipEvent_t merge_events[18];
+            std::string event_names[17];
+            int event_idx = 0;
             if (rocsolver_stedc_profile_messages)
             {
                 printf("\tMerge level %d:\n", k);
 
-                hipEvent_t merge_events[18];
-                std::string event_names[17];
                 for(int i = 0; i < 18; i++)
                     HIP_CHECK(hipEventCreate(&merge_events[i]));
 
-                int event_idx = 0;
             }
 
             rocblas_int n_merges = 1 << (levs - k - 1);
@@ -2420,10 +2420,10 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
                                     ldc, strideC, tempgemm);
         }
 
+        hipEvent_t final_events[4];
+        std::string final_event_names[3];
         if (rocsolver_stedc_profile_messages)
         {
-            hipEvent_t final_events[4];
-            std::string final_event_names[3];
             for(int i = 0; i < 4; i++)
                 HIP_CHECK(hipEventCreate(&final_events[i]));
 

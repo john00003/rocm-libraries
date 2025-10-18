@@ -2021,13 +2021,13 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
         // main loop running forwards (for each column)
         for(rocblas_int j = 0; j < k; ++j)
         {
+            hipEvent_t merge_events[6];
+            std::string event_names[5];
+            int num_events = 0;
             if (rocsolver_latrd_profile_messages)
             {
-                hipEvent_t merge_events[6];
-                std::string event_names[5];
                 for(int i = 0; i < 6; i++)
                     HIP_CHECK(hipEventCreate(&merge_events[i]));
-                int num_events = 0;
                 HIP_CHECK(hipEventRecord(merge_events[num_events], stream));
                 event_names[num_events] = "latrd_lower_updateA_kernel";
                 num_events++;
@@ -2127,13 +2127,13 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
         rocblas_int jw;
         for(rocblas_int j = n - 1; j >= n - k; --j)
         {
+            hipEvent_t merge_events[6];
+            std::string event_names[5];
+            int num_events = 0;
             if (rocsolver_latrd_profile_messages)
             {
-                hipEvent_t merge_events[6];
-                std::string event_names[5];
                 for(int i = 0; i < 6; i++)
                     HIP_CHECK(hipEventCreate(&merge_events[i]));
-                int num_events = 0;
             }
             jw = j - n + k;
 
