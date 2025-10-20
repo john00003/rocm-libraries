@@ -209,6 +209,10 @@ rocblas_status rocsolver_sytrd_hetrd_template(rocblas_handle handle,
         // main loop running forwards (for each block of columns)
         // when the unreduced part is not large enough, switch to unblocked algorithm
         j = 0;
+            if (rocsolver_sytrd_profile_messages)
+            {
+                printf("SYTRD kernel timings: \n");
+	    }
         while(j < n - kk)
         {
             hipEvent_t merge_events[3];
@@ -216,7 +220,6 @@ rocblas_status rocsolver_sytrd_hetrd_template(rocblas_handle handle,
             int num_events = 0;
             if (rocsolver_sytrd_profile_messages)
             {
-                printf("SYTRD kernel timings: \n");
                 for(int i = 0; i < 3; i++)
                     HIP_CHECK(hipEventCreate(&merge_events[i]));
 
@@ -311,6 +314,10 @@ rocblas_status rocsolver_sytrd_hetrd_template(rocblas_handle handle,
         // when the unreduced part is not large enough, switch to unblocked algorithm
         j = n - k;
         rocblas_int upkk = n - ((n - kk + k - 1) / k) * k;
+            if (rocsolver_sytrd_profile_messages)
+            {
+	        printf("SYTRD kernel timings: \n");
+	    }
         while(j >= upkk)
         {
             hipEvent_t merge_events[3];

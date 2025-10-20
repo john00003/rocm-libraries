@@ -1952,12 +1952,15 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
         return rocblas_status_success;
 
     // if no eigenvectors required with the classic solver, use sterf
+    if (rocsolver_stedc_profile_messages)
+    {
+    	printf("STEDC kernel timings: \n");
+    }
     if(evect == rocblas_evect_none)
     {
         hipEvent_t sterf_events[2];
         if (rocsolver_stedc_profile_messages)
         {
-            printf("STEDC kernel timings: \n");
             for(int i = 0; i < 2; i++)
                 HIP_CHECK(hipEventCreate(&sterf_events[i]));
 

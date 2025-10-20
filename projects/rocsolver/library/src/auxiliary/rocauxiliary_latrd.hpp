@@ -2019,6 +2019,10 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
     {
         // reduce the first k columns of A
         // main loop running forwards (for each column)
+	    if (rocsolver_latrd_profile_messages)
+	    {
+		printf("LATRD kernel timings: \n");
+	    }
         for(rocblas_int j = 0; j < k; ++j)
         {
             hipEvent_t merge_events[6];
@@ -2026,7 +2030,6 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
             int num_events = 0;
             if (rocsolver_latrd_profile_messages)
             {
-                printf("LATRD kernel timings: \n");
                 for(int i = 0; i < 6; i++)
                     HIP_CHECK(hipEventCreate(&merge_events[i]));
                 HIP_CHECK(hipEventRecord(merge_events[num_events], stream));
@@ -2125,6 +2128,10 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
     {
         // reduce the last k columns of A
         // main loop running forwards (for each column)
+	if (rocsolver_latrd_profile_messages)
+	{
+    	    printf("LATRD kernel timings: \n");
+	}
         rocblas_int jw;
         for(rocblas_int j = n - 1; j >= n - k; --j)
         {
