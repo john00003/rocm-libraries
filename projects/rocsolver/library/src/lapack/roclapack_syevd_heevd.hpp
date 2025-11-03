@@ -436,7 +436,9 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
         HIP_CHECK(hipMemsetAsync((void*)work1, 0, size_work1, stream));
         HIP_CHECK(hipMemsetAsync((void*)work2, 0, size_work2, stream));
         HIP_CHECK(hipMemsetAsync((void*)work3, 0, size_work3, stream));
-        HIP_CHECK(hipMemsetAsync((void*)work4, 0, size_work4, stream));
+	if (size_work4 > 0){
+        	HIP_CHECK(hipMemsetAsync((void*)work4, 0, size_work4, stream));
+	}
         HIP_CHECK(hipMemsetAsync((void*)tmpz, 0, size_tmpz, stream));
         HIP_CHECK(hipMemsetAsync((void*)splits, 0, size_splits, stream));
         HIP_CHECK(hipMemsetAsync((void*)tmptau_W, 0, size_tmptau_W, stream));
