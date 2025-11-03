@@ -556,18 +556,41 @@ void syevd_heevd_getError(const rocblas_handle handle,
     std::vector<int> iwork(liwork);
     std::vector<T> A(lda * n * bc);
 
+    rocblas_handle handle2;
+    rocblas_create_handle(&handle2);
+
+    hipStream_t stream;
+    CHECK_HIP_ERROR(hipStreamCreate(&stream));
+    CHECK_ROCBLAS_ERROR(rocblas_set_stream(handle2, stream));
+
     // input data initialization
     syevd_heevd_initData<true, true, T>(handle, evect, n, dA, lda, bc, hA, A);
 
+    CHECK_HIP_ERROR(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+
+    CHECK_ROCBLAS_ERROR(rocsolver_syevd_heevd(STRIDED, handle2, evect, uplo, n, dA.data(), lda, stA,
+                                              dD.data(), stD, dE.data(), stE, dinfo.data(), bc));
+
+    hipGraph_t graph;
+    CHECK_HIP_ERROR(hipStreamEndCapture(stream, &graph));
+    hipGraphExec_t graphExec;
+    CHECK_HIP_ERROR(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+    CHECK_HIP_ERROR(hipGraphDestroy(graph));
+
     // execute computations
     // GPU lapack
-    CHECK_ROCBLAS_ERROR(rocsolver_syevd_heevd(STRIDED, handle, evect, uplo, n, dA.data(), lda, stA,
-                                              dD.data(), stD, dE.data(), stE, dinfo.data(), bc));
+    // CHECK_ROCBLAS_ERROR(rocsolver_syevd_heevd(STRIDED, handle, evect, uplo, n, dA.data(), lda, stA,
+    //                                           dD.data(), stD, dE.data(), stE, dinfo.data(), bc));
+    CHECK_HIP_ERROR(hipGraphLaunch(graphExec, stream));
 
     CHECK_HIP_ERROR(hDres.transfer_from(dD));
     CHECK_HIP_ERROR(hinfoRes.transfer_from(dinfo));
     if(evect == rocblas_evect_original)
         CHECK_HIP_ERROR(hAres.transfer_from(dA));
+
+    CHECK_ROCBLAS_ERROR(rocblas_destroy_handle(handle2));
+    CHECK_HIP_ERROR(hipStreamDestroy(stream));
+    CHECK_HIP_ERROR(hipGraphExecDestroy(graphExec));
 
     // CPU lapack
     for(rocblas_int b = 0; b < bc; ++b)
@@ -688,20 +711,41 @@ void syevd_heevd_getPerfData(const rocblas_handle handle,
         *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
     }
 
-    syevd_heevd_initData<true, false, T>(handle, evect, n, dA, lda, bc, hA, A, 0);
+    // syevd_heevd_initData<true, false, T>(handle, evect, n, dA, lda, bc, hA, A, 0);
+    rocblas_handle handle2;
+    rocblas_create_handle(&handle2);
+
+    hipStream_t stream;
+    CHECK_HIP_ERROR(hipStreamCreate(&stream));
+    CHECK_ROCBLAS_ERROR(rocblas_set_stream(handle2, stream));
+
+    syevd_heevd_initData<true, true, T>(handle2, evect, n, dA, lda, bc, hA, A, 0);
+
+    CHECK_HIP_ERROR(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+
+    CHECK_ROCBLAS_ERROR(rocsolver_syevd_heevd(STRIDED, handle2, evect, uplo, n, dA.data(), lda, stA,
+                                              dD.data(), stD, dE.data(), stE, dinfo.data(), bc));
+
+    hipGraph_t graph;
+    CHECK_HIP_ERROR(hipStreamEndCapture(stream, &graph));
+    hipGraphExec_t graphExec;
+    CHECK_HIP_ERROR(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+    CHECK_HIP_ERROR(hipGraphDestroy(graph));
 
     // cold calls
     for(int iter = 0; iter < 2; iter++)
     {
-        syevd_heevd_initData<false, true, T>(handle, evect, n, dA, lda, bc, hA, A, 0);
+        // syevd_heevd_initData<false, true, T>(handle, evect, n, dA, lda, bc, hA, A, 0);
+        syevd_heevd_initData<false, true, T>(handle2, evect, n, dA, lda, bc, hA, A, 0);
 
-        CHECK_ROCBLAS_ERROR(rocsolver_syevd_heevd(STRIDED, handle, evect, uplo, n, dA.data(), lda, stA,
-                                                  dD.data(), stD, dE.data(), stE, dinfo.data(), bc));
+        // CHECK_ROCBLAS_ERROR(rocsolver_syevd_heevd(STRIDED, handle, evect, uplo, n, dA.data(), lda, stA,
+        //                                           dD.data(), stD, dE.data(), stE, dinfo.data(), bc));
+        CHECK_HIP_ERROR(hipGraphLaunch(graphExec, stream));
     }
 
     // gpu-lapack performance
-    hipStream_t stream;
-    CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
+    // hipStream_t stream;
+    // CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
     double start;
 
     if(profile > 0)
@@ -716,14 +760,20 @@ void syevd_heevd_getPerfData(const rocblas_handle handle,
 
     for(rocblas_int iter = 0; iter < hot_calls; iter++)
     {
-        syevd_heevd_initData<false, true, T>(handle, evect, n, dA, lda, bc, hA, A, 0);
+        // syevd_heevd_initData<false, true, T>(handle, evect, n, dA, lda, bc, hA, A, 0);
+        syevd_heevd_initData<false, true, T>(handle2, evect, n, dA, lda, bc, hA, A, 0);
 
         start = get_time_us_sync(stream);
-        rocsolver_syevd_heevd(STRIDED, handle, evect, uplo, n, dA.data(), lda, stA, dD.data(), stD,
-                              dE.data(), stE, dinfo.data(), bc);
+        // rocsolver_syevd_heevd(STRIDED, handle, evect, uplo, n, dA.data(), lda, stA, dD.data(), stD,
+        //                       dE.data(), stE, dinfo.data(), bc);
+        CHECK_HIP_ERROR(hipGraphLaunch(graphExec, stream));
         *gpu_time_used += get_time_us_sync(stream) - start;
     }
     *gpu_time_used /= hot_calls;
+
+    CHECK_ROCBLAS_ERROR(rocblas_destroy_handle(handle2));
+    CHECK_HIP_ERROR(hipStreamDestroy(stream));
+    CHECK_HIP_ERROR(hipGraphExecDestroy(graphExec));
 }
 
 template <bool BATCHED, bool STRIDED, typename T>
