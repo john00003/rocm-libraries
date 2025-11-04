@@ -1218,10 +1218,19 @@ __device__ inline void reduce_block_sum(S& val)
         {
             if(tid < r)
             {
+                // S second = lds[tid + r] ? (tid + r < BDIM): 0;
+                // lds[tid] += second;
                 lds[tid] += lds[tid + r];
             }
             __syncthreads();
         }
+
+        rocblas_int remainder_start = (BDIM / warpSize) * warpSize;
+        if (remainder_start < BDIM && tid < (BDIM - remainder_start))
+        {
+            lds[tid] += lds[remainder_start + tid];
+        }
+        __syncthreads();
 
         val = lds[tid];
         __syncthreads();
@@ -1282,6 +1291,22 @@ __device__ inline void reduce_block_sum(S& val1, S& val2, S& val3)
         lds3[tid] = val3;
         __syncthreads();
 
+// #pragma unroll
+//         for(rocblas_int r = BDIM-1; r >= warpSize; r /= 2)
+//         {
+//             if(tid < r)
+//             {
+//                 S second1 = lds1[tid + r] ? (tid + r < BDIM): 0;
+//                 S second2 = lds2[tid + r] ? (tid + r < BDIM): 0;
+//                 S second3 = lds3[tid + r] ? (tid + r < BDIM): 0;
+//                 lds1[tid] += second1;
+//                 lds2[tid] += second2;
+//                 lds3[tid] += second3;
+//                 // lds[tid] += lds[tid + r];
+//             }
+//             __syncthreads();
+//         }
+
 #pragma unroll
         for(rocblas_int r = BDIM / 2; r >= warpSize; r /= 2)
         {
@@ -1293,6 +1318,15 @@ __device__ inline void reduce_block_sum(S& val1, S& val2, S& val3)
             }
             __syncthreads();
         }
+
+        rocblas_int remainder_start = (BDIM / warpSize) * warpSize;
+        if (remainder_start < BDIM && tid < (BDIM - remainder_start))
+        {
+            lds1[tid] += lds1[remainder_start + tid];
+            lds2[tid] += lds2[remainder_start + tid];
+            lds3[tid] += lds3[remainder_start + tid];
+        }
+        __syncthreads();
 
         val1 = lds1[tid];
         val2 = lds2[tid];
@@ -2246,7 +2280,7 @@ __device__ I laed4_alt(I n,
           here their size is STEDC_SOLVE_BDIM (= wave size) **/
 
 template <rocblas_int BDIM /* = STEDC_SOLVE_BDIM */, typename S>
-ROCSOLVER_KERNEL void __launch_bounds__(STEDC_SOLVE_BDIM)
+ROCSOLVER_KERNEL void __launch_bounds__(STEDC_SOLVE_BDIM+1)
     stedc_mergeValues_Solve_kernel(const rocblas_int k,
                                    const rocblas_int n,
                                    S* DD,
@@ -3252,8 +3286,8 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
             else
             {
                 constexpr rocblas_int WarpSize = 32;
-                ROCSOLVER_LAUNCH_KERNEL((stedc_mergeValues_Solve_kernel<WarpSize, S>),
-                                        dim3(n, batch_count), dim3(WarpSize), 0, stream, k, n,
+                ROCSOLVER_LAUNCH_KERNEL((stedc_mergeValues_Solve_kernel<WarpSize+1, S>),
+                                        dim3(n, batch_count), dim3(WarpSize+1), 0, stream, k, n,
                                         D + shiftD, strideD, E + shiftE, strideE, tmpz, tempgemm,
                                         splits, eps, ssfmin, ssfmax);
             }
