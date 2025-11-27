@@ -67,7 +67,7 @@ option(ONLY_INSTALL "Only install" OFF)
 cmake_dependent_option(BUILD_TEST "Build tests (requires googletest)" OFF "NOT ONLY_INSTALL" OFF)
 option(WITH_ROCRAND "Build tests with device-side data generation(requires rocRAND)" OFF)
 cmake_dependent_option(BUILD_BENCHMARK "Build benchmarks" OFF "NOT ONLY_INSTALL" OFF)
-cmake_dependent_option(BUILD_EXAMPLE "Build examples" OFF "NOT ONLY_INSTALL" OFF)
+cmake_dependent_option(BUILD_EXAMPLE "Build examples" ON "NOT ONLY_INSTALL" ON)
 option(BUILD_NAIVE_BENCHMARK "Build naive benchmarks" OFF)
 cmake_dependent_option(BUILD_DOCS "Build documentation (requires sphinx)" OFF "NOT ONLY_INSTALL" OFF)
 option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
@@ -162,7 +162,7 @@ else()
       )
     else()
       rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-        TARGETS "gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201"
+        TARGETS "gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx12-generic"
       )
     endif()
     set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
