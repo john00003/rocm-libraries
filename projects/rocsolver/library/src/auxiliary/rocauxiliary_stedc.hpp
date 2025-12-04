@@ -238,6 +238,36 @@ __host__ __device__ inline S* ptr_etmpd(rocblas_int n, S* tempgemm)
     return tempgemm + 1 * n * n;
 }
 
+/** Args struct for stedc_buildGemmPtrArray host function.
+    Memory layout: [struct][positions array][hABC buffer]
+    Must persist until graph execution completes. **/
+template <typename S>
+struct stedc_GemmPtrArgs
+{
+    S** hABC;
+    S* V;
+    S* tempgemm;
+    rocblas_int ldv;
+    rocblas_int n;
+    rocblas_int nbb;
+};
+
+template <typename S>
+void stedc_buildGemmPtrArray(void* userData)
+{
+    auto* args = static_cast<stedc_GemmPtrArgs<S>*>(userData);
+    const rocblas_int* positions = reinterpret_cast<const rocblas_int*>(args + 1);
+
+    for(rocblas_int j = 0; j < args->nbb; ++j)
+    {
+        auto ps = positions[j];
+        args->hABC[j + 0 * args->nbb] = args->V + ps + ps * args->ldv;
+        args->hABC[j + 1 * args->nbb] = ptr_etmpd(args->n, args->tempgemm) + ps + ps * args->n;
+        args->hABC[j + 2 * args->nbb] = ptr_vecs(args->n, args->tempgemm) + ps + ps * args->n;
+    }
+}
+
+
 /*************** Main kernels *********************************************************/
 /**************************************************************************************/
 
@@ -261,6 +291,9 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
 {
     // threads and groups indices
     rocblas_int bid = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    // if (bid == 0)
+        //printf("enter STEDC divide kernel\n");
+    
 
     // for each matrix in the batch
     if(bid < batch_count)
@@ -333,6 +366,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM) stedc_solve_kernel(const roc
     // thread index
     rocblas_int tidb = hipThreadIdx_x;
     rocblas_int tidb_inc = hipBlockDim_x;
+    // if (tidb == 0 && bid == 0)
+    //     printf("enter STEDC solve kernel\n");
 
     // select batch instance to work with
     S* C = load_ptr_batch<S>(CC, bid, shiftC, strideC);
@@ -367,6 +402,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM) stedc_update_splits(const ro
                                                                         const rocblas_int n,
                                                                         rocblas_int* splitsA)
 {
+    // if (hipThreadIdx_x == 0 && hipBlockIdx_x == 0 && hipBlockIdx_y == 0)
+    //     printf("enter STEDC updatesplits kernel\n");
     rocblas_int bid = hipBlockIdx_y;
     rocblas_int* splits = splitsA + bid * get_splits_size(n);
     rocblas_int* em = ptr_em(n, splits);
@@ -452,6 +489,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
                                           rocblas_int* splitsA,
                                           const S eps)
 {
+    // if (hipThreadIdx_x == 0 && hipBlockIdx_x == 0 && hipBlockIdx_y == 0)
+    //     printf("enter STEDC mergePrepare deflatezero kernel\n");
     // threads and groups indices
     // batch instance id
     rocblas_int bid = hipBlockIdx_y;
@@ -581,6 +620,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
                                     S* tmpzA,
                                     rocblas_int* splitsA)
 {
+    // if (hipThreadIdx_x == 0 && hipBlockIdx_x == 0 && hipBlockIdx_y == 0)
+    //     printf("enter STEDC mergePrepare sortd kernel\n");
     // threads and groups indices
     // batch instance id
     rocblas_int bid = hipBlockIdx_y;
@@ -696,6 +737,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
                                            S* tmpzA,
                                            rocblas_int* splitsA)
 {
+    // if (hipThreadIdx_x == 0 && hipBlockIdx_x == 0 && hipBlockIdx_y == 0)
+    //     printf("enter STEDC mergePrepare setcandflags kernel\n");
     // threads and groups indices
     // batch instance id
     rocblas_int bid = hipBlockIdx_y;
@@ -758,6 +801,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
                                            S* tmpzA,
                                            rocblas_int* splitsA)
 {
+    // if (hipThreadIdx_x == 0 && hipBlockIdx_x == 0 && hipBlockIdx_y == 0)
+    //     printf("enter STEDC mergePrepare deflatecount kernel\n");
     // threads and groups indices
     // batch instance id
     rocblas_int bid = hipBlockIdx_y;
@@ -838,6 +883,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
                                            S* tmpzA,
                                            rocblas_int* splitsA)
 {
+    // if (hipThreadIdx_x == 0 && hipBlockIdx_x == 0 && hipBlockIdx_y == 0)
+    //     printf("enter STEDC mergePrepare deflateapply kernel\n");
     // threads and groups indices
     // batch instance id
     rocblas_int bid = hipBlockIdx_y;
@@ -916,6 +963,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
                              S* tmpzA,
                              rocblas_int* splitsA)
 {
+    // if (hipThreadIdx_x == 0 && hipBlockIdx_x == 0 && hipBlockIdx_y == 0)
+    //     printf("enter STEDC mergerotate kernel\n");
     // threads and groups indices
     // batch instance id
     rocblas_int bid = hipBlockIdx_y;
@@ -1010,6 +1059,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
                                     S* tmpzA,
                                     rocblas_int* splitsA)
 {
+    // if (hipThreadIdx_x == 0 && hipBlockIdx_x == 0 && hipBlockIdx_y == 0)
+    //     printf("enter STEDC mergevalues sortdz kernel\n");
     // threads and groups indices
     // batch instance id
     rocblas_int bid = hipBlockIdx_y;
@@ -1137,6 +1188,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
                                    S* tempgemmA,
                                    rocblas_int* splitsA)
 {
+    // if (hipThreadIdx_x == 0 && hipBlockIdx_x == 0 && hipBlockIdx_y == 0)
+    //     printf("enter STEDC mergevalues copyD kernel\n");
     // threads and groups indices
     // batch instance id
     rocblas_int bid = hipBlockIdx_y;
@@ -1198,6 +1251,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_SOLVE_BDIM)
                                    const S ssfmin,
                                    const S ssfmax)
 {
+    // if (hipThreadIdx_x == 0 && hipBlockIdx_x == 0 && hipBlockIdx_y == 0)
+    //     printf("enter STEDC mergevalues solve 2 kernel\n");
     // threads and groups indices
     // batch instance id
     rocblas_int bid = hipBlockIdx_y;
@@ -1269,6 +1324,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
                                      const S ssfmin,
                                      const S ssfmax)
 {
+    // if (hipThreadIdx_x == 0 && hipBlockIdx_x == 0 && hipBlockIdx_y == 0)
+    //     printf("enter STEDC mergevalues rescale kernel\n");
     // threads and groups indices
     // batch instance id
     rocblas_int bid = hipBlockIdx_y;
@@ -1347,6 +1404,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
                               S* tempgemmA,
                               rocblas_int* splitsA)
 {
+    // if (hipThreadIdx_x == 0 && hipBlockIdx_x == 0 && hipBlockIdx_y == 0)
+    //     printf("enter STEDC mergevectors kernel\n");
     // threads and groups indices
     // batch instance id
     rocblas_int bid = hipBlockIdx_y;
@@ -1484,6 +1543,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
                              S* tempgemmA,
                              rocblas_int* splitsA)
 {
+    // if (hipThreadIdx_x == 0 && hipBlockIdx_x == 0 && hipBlockIdx_y == 0)
+    //     printf("enter STEDC mergeupdate kernel\n");
     // threads and groups indices
     // batch instance id
     rocblas_int bid = hipBlockIdx_y;
@@ -1527,6 +1588,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM) stedc_copyD(const rocblas_in
                                                                 S* DDout,
                                                                 const rocblas_stride strideDout)
 {
+    // if (hipThreadIdx_x == 0 && hipBlockIdx_x == 0 && hipBlockIdx_y == 0)
+    //     printf("enter STEDC copyD kernel\n");
     // batch instance id
     rocblas_int bid = hipBlockIdx_y;
 
@@ -1568,6 +1631,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM) stedc_copyC(const rocblas_in
                                                                 const rocblas_int ldcout,
                                                                 const rocblas_stride strideCout)
 {
+    // if (hipThreadIdx_x == 0 && hipBlockIdx_x == 0 && hipBlockIdx_y == 0)
+    //     printf("enter STEDC copyC kernel\n");
     // batch instance id
     rocblas_int bid = hipBlockIdx_y;
     // group id
@@ -1613,6 +1678,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM) stedc_reshuffleC(const rocbl
                                                                      const rocblas_stride strideCout,
                                                                      rocblas_int* splitsA)
 {
+    // if (hipThreadIdx_x == 0 && hipBlockIdx_x == 0 && hipBlockIdx_y == 0)
+    //     printf("enter STEDC reshuffleC kernel\n");
     // batch instance id
     rocblas_int bid = hipBlockIdx_y;
     // group id
@@ -1670,6 +1737,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM) stedc_sort(const rocblas_int
 
 )
 {
+    // if (hipThreadIdx_x == 0 && hipBlockIdx_x == 0 && hipBlockIdx_y == 0)
+    //     printf("enter STEDC stedc_sort kernel\n");
     // batch instance id
     rocblas_int bid = hipBlockIdx_y;
     // group id
@@ -2021,6 +2090,7 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
         // launch merge for level k
         for(rocblas_int k = 0; k < levs; ++k)
         {
+	    //printf("hello from 0 \n");
             rocblas_int n_merges = 1 << (levs - k - 1);
             ROCSOLVER_LAUNCH_KERNEL(stedc_update_splits, dim3(1, batch_count), dim3(STEDC_BDIM), 0,
                                     stream, levs, k, n, splits);
@@ -2074,13 +2144,17 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
                                     dim3(STEDC_BDIM), 0, stream, k, n, D + shiftD, strideD,
                                     E + shiftE, strideE, tmpz, tempgemm, splits, eps, ssfmin, ssfmax);
 
+	    //printf("hello from 1 \n");
             // c. find merged eigenvectors
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergeVectors_kernel<STEDC_EXTERNAL_GEMM, S>),
                                     dim3(n, batch_count), dim3(STEDC_BDIM), 0, stream, k, n, V, 0,
                                     ldv, strideV, tmpz, tempgemm, splits);
 
+	    //printf("hello from 3 \n");
+
             if(STEDC_EXTERNAL_GEMM)
             {
+		//printf("hello from 4 \n");
                 // using external gemms with padded matrices to do the vector update
                 // One single full gemm of size n x n x n merges all the blocks in the level
                 // TODO: using macro STEDC_EXTERNAL_GEMM = true for now. In the future we can pass
@@ -2092,13 +2166,16 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
                                    &one, V, 0, ldv, strideV, ptr_etmpd(n, tempgemm), 0, n,
                                    get_tempgemm_size(n), &zero, ptr_vecs(n, tempgemm), 0, n,
                                    get_tempgemm_size(n), batch_count, workArr);
+	    		//printf("hello from 2 \n");
                 }
                 else
                 {
+			//printf("hello from 5 \n");
                     HIP_CHECK(hipMemsetAsync((void*)tempgemm, 0, n * n * sizeof(S), stream));
 
                     if(n % n_merges == 0)
                     {
+			//printf("hello from 6 \n");
                         int sz = n / n_merges;
                         rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_none, sz,
                                        sz, sz, &one, V, 0, ldv, sz * ldv + sz,
@@ -2107,6 +2184,7 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
                     }
                     else
                     {
+			//printf("hello from 7 \n");
                         rocblas_int lvl = levs - k - 1;
                         std::vector<rocblas_int> ns(n_merges);
                         ns[0] = n;
@@ -2128,36 +2206,75 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
                         for(rocblas_int i = 0, nsb = ns[0]; i < 2; ++i, ++nsb)
                         {
                             auto& b = uniform_batch[i];
-                            auto nbb = b.size();
-                            std::vector<S*> hABC(nbb * 3);
-                            for(size_t j = 0; j < nbb; ++j)
-                            {
-                                auto ps = b[j];
-                                hABC[j + 0 * nbb] = ps + ps * ldv + V;
-                                hABC[j + 1 * nbb] = ps + ps * n + ptr_etmpd(n, tempgemm);
-                                hABC[j + 2 * nbb] = ps + ps * n + ptr_vecs(n, tempgemm);
-                            }
-                            HIP_CHECK(hipMemcpyAsync(workArr, hABC.data(), 3 * nbb * sizeof(S*),
+                            // auto nbb = b.size();
+                            // std::vector<S*> hABC(nbb * 3);
+                            // for(size_t j = 0; j < nbb; ++j)
+                            // {
+                            //     auto ps = b[j];
+                            //     hABC[j + 0 * nbb] = ps + ps * ldv + V;
+                            //     hABC[j + 1 * nbb] = ps + ps * n + ptr_etmpd(n, tempgemm);
+                            //     hABC[j + 2 * nbb] = ps + ps * n + ptr_vecs(n, tempgemm);
+                            // }
+                            // HIP_CHECK(hipMemcpyAsync(workArr, hABC.data(), 3 * nbb * sizeof(S*),
+                            //                          hipMemcpyHostToDevice, stream));
+                            rocblas_int nbb = b.size();
+                            if(nbb == 0)
+                                continue;
+
+                            // allocate persistent buffer: [struct][positions][hABC]
+                            // must persist until graph execution completes i think
+                            size_t argsSize = sizeof(stedc_GemmPtrArgs<S>)
+                                + nbb * sizeof(rocblas_int)
+                                + 3 * nbb * sizeof(S*);
+                            auto* args = static_cast<stedc_GemmPtrArgs<S>*>(malloc(argsSize));
+
+                            rocblas_int* positions = reinterpret_cast<rocblas_int*>(args + 1);
+                            S** hABC = reinterpret_cast<S**>(positions + nbb);
+
+                            args->hABC = hABC;
+                            args->V = V;
+                            args->tempgemm = tempgemm;
+                            args->ldv = ldv;
+                            args->n = n;
+                            args->nbb = nbb;
+                            std::memcpy(positions, b.data(), nbb * sizeof(rocblas_int));
+
+                            stedc_buildGemmPtrArray<S>(args);
+
+                            // 1. Host function builds pointer array (no HIP calls inside)
+                            HIP_CHECK(hipLaunchHostFunc(stream, stedc_buildGemmPtrArray<S>, args));
+
+                            // 2. Separate hipMemcpyAsync copies from hABC to device
+                            HIP_CHECK(hipMemcpyAsync(workArr, hABC, 3 * nbb * sizeof(S*),
                                                      hipMemcpyHostToDevice, stream));
+
+                            // 3. GEMM uses the pointer array
                             rocsolver_gemm<S, rocblas_int, S* const*, S* const*, S* const*>(
                                 handle, rocblas_operation_none, rocblas_operation_none, nsb, nsb,
                                 nsb, &one, workArr, 0, ldv, 0, workArr + nbb, 0, n, 0, &zero,
                                 workArr + 2 * nbb, 0, n, 0, nbb, nullptr);
                         }
                     }
+
+			//printf("hello from 8 \n");
                 }
             }
+			//printf("hello from 9 \n");
 
             // d. update level
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergeUpdate_kernel<S>), dim3(n, batch_count),
                                     dim3(STEDC_BDIM), 0, stream, k, n, D + shiftD, strideD, V, 0,
                                     ldv, strideV, tmpz, tempgemm, splits);
+			//printf("hello from  10\n");
         }
+
+			//printf("hello from  11\n");
 
         // 4. update and sort
         //----------------------
         if(evect != rocblas_evect_tridiagonal)
         {
+			//printf("hello from  12\n");
             // eigenvectors C <- C*V
             local_gemm<BATCHED, STRIDED, T>(handle, n, C, shiftC, ldc, strideC, V, tempgemm,
                                             tempgemm + strideV, 0, ldv, strideV, batch_count,
@@ -2165,6 +2282,7 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
         }
         else if constexpr(rocblas_is_complex<T>)
         {
+			//printf("hello from  15\n");
             // V is stored in C but is of type S; need to convert to type T
             // tempgemm = V
             ROCSOLVER_LAUNCH_KERNEL(copy_mat<S>, dim3(groupsn, groupsn, batch_count), dim3(BS2, BS2),
@@ -2180,6 +2298,7 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
                                     ldc, strideC, tempgemm);
         }
 
+			//printf("hello from  13\n");
         ROCSOLVER_LAUNCH_KERNEL(stedc_copyD, dim3(1, batch_count), dim3(STEDC_BDIM), 0, stream, n,
                                 D + shiftD, strideD, tmpz, n);
 
@@ -2191,6 +2310,8 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
                                 ldc, strideC);
 
         rocblas_set_pointer_mode(handle, old_mode);
+
+			//printf("hello from  14\n");
     }
 
     return rocblas_status_success;
