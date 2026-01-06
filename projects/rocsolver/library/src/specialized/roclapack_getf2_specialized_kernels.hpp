@@ -93,6 +93,31 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
             }
         }
 
+        // DEBUG: Print pivot_value using shared memory transfer
+        // Save current common value to temp register
+        T temp_common_val = common[myrow];
+        __syncthreads();
+        
+        // Store pivot_value in shared memory at each thread's position
+        common[myrow] = pivot_value;
+        __syncthreads();
+        
+        // Thread 0 of batch 0 prints all pivot_values
+        if constexpr(std::is_same_v<T, float>){
+            if(myrow == 0 && id == 0)
+            {
+                printf("DEBUG k=%d pivot_values: ", (int)k);
+                for(I i = 0; i < m; ++i)
+                    printf("%f ", common[i]);
+                printf(" (pivot_index=%d)\n", (int)pivot_index);
+            }
+            __syncthreads();
+        }
+        
+        // Restore original common value
+        common[myrow] = temp_common_val;
+        __syncthreads();
+
         // check singularity and scale value for current column
         if(pivot_value != T(0))
             pivot_value = S(1) / pivot_value;
@@ -124,6 +149,25 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
                 rA[j] -= rA[k] * common[j];
         }
         __syncthreads();
+
+        // DEBUG: Print matrix A at end of iteration k
+        // Each thread owns a row (tracked by myrow), print row by row in order
+        if constexpr(std::is_same_v<T, float>){
+            if(id == 0) // Only batch 0 to limit output
+            {
+                for(I row = 0; row < m; ++row)
+                {
+                    if(myrow == row)
+                    {
+                        printf("DEBUG Iter k=%d Row %d: ", (int)k, (int)row);
+                        for(I j = 0; j < DIM; ++j)
+                            printf("%f ", rA[j]);
+                        printf("\n");
+                    }
+                    __syncthreads();
+                }
+            }
+        }
     }
 
     // write results to global memory

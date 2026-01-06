@@ -37,6 +37,14 @@
 #include "rocsolver/rocsolver.h"
 #include "rocsolver_run_specialized_kernels.hpp"
 
+// Debug includes for gold comparison
+#include "getrf_debug_gold.hpp"
+
+// Define the gold files directory - adjust path as needed
+#ifndef GETRF_GOLD_DIR
+#define GETRF_GOLD_DIR "/home/johtyler/code/rocm-libraries-getf2-instrumentation/projects/rocsolver/library/src/specialized"
+#endif
+
 ROCSOLVER_BEGIN_NAMESPACE
 
 /** Constants for inner block size of getrf **/
@@ -501,6 +509,74 @@ rocblas_status getrf_panelLU(rocblas_handle handle,
                                                inca, lda, strideA, ipiv, shiftP + k, strideP, info,
                                                batch_count, scalars, pivotval, pivotidx, pivot,
                                                offset + k, permut_idx, stridePI);
+        // DEBUG: Compare with gold BEFORE row permutation (after getf2, before row swaps)
+        // Gold files are named by k at START of iteration:
+        //   gold-GETF2-k0  = after 1st iteration (k=0)
+        //   gold-GETF2-k24 = after 2nd iteration (k=24)
+        //   gold-GETF2-k48 = after 3rd iteration (k=48)
+        if constexpr(std::is_same_v<T, float>) // Only for float type
+        {
+            // Check 2nd and 3rd iterations (k=24 and k=48 at start)
+            if(k == 24 || k == 48)
+            {
+                std::cout << "Comparing with gold after iteration starting at k=" << k << std::endl;
+                hipStreamSynchronize(stream);
+                
+                // Read gold matrices for this checkpoint (named by k at start of iteration)
+                std::string prefix = (k == 24) ? "gold-GETF2-k24" : "gold-GETF2-k48";
+                std::vector<rocsolver_debug::GoldMatrix<T>> goldMatrices;
+                
+                if(rocsolver_debug::readAllGoldMatrices<T>(GETRF_GOLD_DIR, prefix, 
+                                                           batch_count, goldMatrices))
+                {
+                    std::string checkpointName = "After getf2 iteration k=" + std::to_string(k);
+                    bool match = false;
+                    
+                    if constexpr(BATCHED)
+                    {
+                        // BATCHED case: A is T* const* (array of device pointers)
+                        match = rocsolver_debug::compareWithGoldBatched(
+                            A,                // Array of device pointers
+                            shiftA,           // Shift into each matrix
+                            lda,
+                            mm,               // Panel rows
+                            nn,               // Panel cols (not n!)
+                            batch_count,
+                            goldMatrices,
+                            checkpointName,
+                            static_cast<T>(1e-4)  // tolerance
+                        );
+                    }
+                    else
+                    {
+                        // STRIDED case: A is a single pointer with stride
+                        match = rocsolver_debug::compareWithGoldStrided(
+                            A + shiftA,       // Start of matrix data
+                            lda,
+                            mm,               // Panel rows
+                            nn,               // Panel cols (not n!)
+                            strideA,
+                            batch_count,
+                            goldMatrices,
+                            checkpointName,
+                            static_cast<T>(1e-4)  // tolerance
+                        );
+                    }
+                    
+                    if(!match)
+                    {
+                        std::cerr << "ERROR: Mismatch detected at iteration k=" << k 
+                                  << ", aborting!" << std::endl;
+                        std::abort();
+                    }
+                }
+                else
+                {
+                    std::cerr << "WARNING: Could not read gold files for k=" << k << std::endl;
+                }
+            }
+        }
+
         if(pivot)
         {
             dimx = jb;
