@@ -73,7 +73,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
         rA[j] = A[myrow + j * lda];
 
         // for each pivot (main loop)
-#pragma unroll DIM
+//#pragma unroll DIM
     for(I k = 0; k < DIM; ++k)
     {
         // share current column
@@ -111,8 +111,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
                     printf("%f ", common[i]);
                 printf(" (pivot_index=%d)\n", (int)pivot_index);
             }
-            __syncthreads();
         }
+        __syncthreads(); // Must be outside if constexpr for non-float types!
         
         // Restore original common value
         common[myrow] = temp_common_val;
@@ -152,20 +152,18 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
 
         // DEBUG: Print matrix A at end of iteration k
         // Each thread owns a row (tracked by myrow), print row by row in order
+        // NOTE: __syncthreads() must be hit by ALL threads in block, so it's outside if(id==0)
         if constexpr(std::is_same_v<T, float>){
-            if(id == 0) // Only batch 0 to limit output
+            for(I row = 0; row < m; ++row)
             {
-                for(I row = 0; row < m; ++row)
+                if(id == 0 && myrow == row) // Only batch 0, only the thread owning this row
                 {
-                    if(myrow == row)
-                    {
-                        printf("DEBUG Iter k=%d Row %d: ", (int)k, (int)row);
-                        for(I j = 0; j < DIM; ++j)
-                            printf("%f ", rA[j]);
-                        printf("\n");
-                    }
-                    __syncthreads();
+                    printf("DEBUG Iter k=%d Row %d: ", (int)k, (int)row);
+                    for(I j = 0; j < DIM; ++j)
+                        printf("%f ", rA[j]);
+                    printf("\n");
                 }
+                __syncthreads(); // ALL threads must hit this!
             }
         }
     }
