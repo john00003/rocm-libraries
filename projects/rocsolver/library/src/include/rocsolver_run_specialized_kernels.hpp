@@ -343,7 +343,10 @@ rocblas_status getf2_run_small(rocblas_handle handle,
                                const bool pivot,
                                const I offset,
                                I* permut_idx,
-                               const rocblas_stride stride);
+                               const rocblas_stride stride,
+                               // Gold verification arguments (optional)
+                               T* gold_ptr = nullptr,
+                               const I gold_lda = 70);
 
 template <typename T, typename U>
 rocblas_status getri_run_small(rocblas_handle handle,

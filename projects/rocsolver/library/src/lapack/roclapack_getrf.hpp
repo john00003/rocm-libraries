@@ -39,11 +39,31 @@
 
 // Debug includes for gold comparison
 #include "getrf_debug_gold.hpp"
+#include "../specialized/getf2_gold_device.hpp"
 
 // Define the gold files directory - adjust path as needed
 #ifndef GETRF_GOLD_DIR
 #define GETRF_GOLD_DIR "/home/johtyler/code/rocm-libraries-getf2-instrumentation/projects/rocsolver/library/src/specialized"
 #endif
+
+// Static storage for gold matrices on device (loaded once on first use)
+namespace {
+    template <typename T>
+    struct GoldDeviceStorage {
+        static T* d_gold_ptr;
+        static bool loaded;
+        static bool load_attempted;
+    };
+    
+    template <typename T>
+    T* GoldDeviceStorage<T>::d_gold_ptr = nullptr;
+    
+    template <typename T>
+    bool GoldDeviceStorage<T>::loaded = false;
+    
+    template <typename T>
+    bool GoldDeviceStorage<T>::load_attempted = false;
+}
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -499,16 +519,55 @@ rocblas_status getrf_panelLU(rocblas_handle handle,
     dim3 grid, threads;
     size_t lmemsize;
 
+    // Load gold matrices to device (once, on first call, only for float)
+    T* gold_device_ptr = nullptr;
+    if constexpr(std::is_same_v<T, float>) {
+        if(!GoldDeviceStorage<T>::load_attempted) {
+            GoldDeviceStorage<T>::load_attempted = true;
+            std::cout << "Loading gold matrices to device for in-kernel verification..." << std::endl;
+            if(getf2_gold::loadAllGoldToDevice<T>(GETRF_GOLD_DIR, &GoldDeviceStorage<T>::d_gold_ptr)) {
+                GoldDeviceStorage<T>::loaded = true;
+            } else {
+                std::cerr << "WARNING: Failed to load gold matrices - in-kernel verification disabled" << std::endl;
+            }
+        }
+        if(GoldDeviceStorage<T>::loaded) {
+            gold_device_ptr = GoldDeviceStorage<T>::d_gold_ptr;
+        }
+    }
+
     // Main loop
     for(I k = 0; k < nn; k += blk)
     {
         jb = std::min(nn - k, blk); // number of columns/pivots in the inner block
 
+        // Determine gold checkpoint based on offset + k
+        // k0 -> checkpoint 0, k24 -> checkpoint 1, k48 -> checkpoint 2
+        T* gold_checkpoint_ptr = nullptr;
+        if constexpr(std::is_same_v<T, float>) {
+            if(gold_device_ptr != nullptr) {
+                I total_offset = offset + k;
+                int checkpoint = -1;
+                if(total_offset == 0) checkpoint = 0;
+                else if(total_offset == 24) checkpoint = 1;
+                else if(total_offset == 48) checkpoint = 2;
+                
+                if(checkpoint >= 0) {
+                    // Point to the 3 matrices for this checkpoint
+                    gold_checkpoint_ptr = gold_device_ptr + 
+                        checkpoint * getf2_gold::GOLD_NUM_BATCHES * getf2_gold::GOLD_MATRIX_SIZE;
+                    std::cout << "Enabling in-kernel gold verification for checkpoint " 
+                              << checkpoint << " (offset+k=" << total_offset << ")" << std::endl;
+                }
+            }
+        }
+
         // factorize inner panel block
         rocsolver_getf2_template<ISBATCHED, T>(handle, mm - k, jb, A, shiftA + idx2D(k, k, inca, lda),
                                                inca, lda, strideA, ipiv, shiftP + k, strideP, info,
                                                batch_count, scalars, pivotval, pivotidx, pivot,
-                                               offset + k, permut_idx, stridePI);
+                                               offset + k, permut_idx, stridePI,
+                                               static_cast<void*>(gold_checkpoint_ptr), static_cast<I>(70));
         // DEBUG: Compare with gold BEFORE row permutation (after getf2, before row swaps)
         // Gold files are named by k at START of iteration:
         //   gold-GETF2-k0  = after 1st iteration (k=0)

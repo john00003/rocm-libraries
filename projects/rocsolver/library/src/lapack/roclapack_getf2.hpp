@@ -566,7 +566,10 @@ rocblas_status rocsolver_getf2_template(rocblas_handle handle,
                                         const bool pivot,
                                         const I offset = 0,
                                         I* permut_idx = nullptr,
-                                        const rocblas_stride stridePI = 0)
+                                        const rocblas_stride stridePI = 0,
+                                        // Gold verification arguments (optional, only used for float T)
+                                        void* gold_ptr = nullptr,
+                                        const I gold_lda = 70)
 {
     ROCSOLVER_ENTER("getf2", "m:", m, "n:", n, "shiftA:", shiftA, "inca:", inca, "lda:", lda,
                     "shiftP:", shiftP, "bc:", batch_count);
@@ -609,7 +612,8 @@ rocblas_status rocsolver_getf2_template(rocblas_handle handle,
         if(spker == 1)
         {
             return getf2_run_small<T>(handle, m, n, A, shiftA, lda, strideA, ipiv, shiftP, strideP,
-                                      info, batch_count, pivot, offset, permut_idx, stridePI);
+                                      info, batch_count, pivot, offset, permut_idx, stridePI,
+                                      static_cast<T*>(gold_ptr), gold_lda);
         }
 
         // use specialized kernels for small skinny matrices (panel factorization)

@@ -12,6 +12,22 @@
 #include "rocblas.hpp"
 #include "rocsolver_run_specialized_kernels.hpp"
 
+// Debug: include argument capture header
+#include "getf2_args_capture.hpp"
+
+// Define directory for captured arguments
+#ifndef GETF2_CAPTURE_DIR
+#define GETF2_CAPTURE_DIR "/home/johtyler/code/rocm-libraries-getf2-instrumentation/projects/rocsolver/library/src/specialized"
+#endif
+
+// Gold verification constants
+namespace getf2_gold {
+    constexpr int GOLD_MATRIX_ROWS = 70;
+    constexpr int GOLD_MATRIX_COLS = 70;
+    constexpr int GOLD_NUM_BATCHES = 3;
+    constexpr size_t GOLD_MATRIX_SIZE = GOLD_MATRIX_ROWS * GOLD_MATRIX_COLS;
+}
+
 ROCSOLVER_BEGIN_NAMESPACE
 
 /*************************************************************
@@ -36,7 +52,10 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
                        const I batch_count,
                        const I offset,
                        I* permut_idx,
-                       const rocblas_stride stridePI)
+                       const rocblas_stride stridePI,
+                       // Gold verification arguments (optional, set gold_ptr to nullptr to skip)
+                       T* gold_ptr = nullptr,         // Pointer to gold matrices for this checkpoint (3 batches)
+                       const I gold_lda = 70)         // Leading dimension of gold matrices (row-major)
 {
     using S = decltype(std::real(T{}));
 
@@ -95,28 +114,28 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
 
         // DEBUG: Print pivot_value using shared memory transfer
         // Save current common value to temp register
-        T temp_common_val = common[myrow];
-        __syncthreads();
+        // T temp_common_val = common[myrow];
+        // __syncthreads();
         
-        // Store pivot_value in shared memory at each thread's position
-        common[myrow] = pivot_value;
-        __syncthreads();
+        // // Store pivot_value in shared memory at each thread's position
+        // common[myrow] = pivot_value;
+        // __syncthreads();
         
-        // Thread 0 of batch 0 prints all pivot_values
-        if constexpr(std::is_same_v<T, float>){
-            if(myrow == 0 && id == 0)
-            {
-                printf("DEBUG k=%d pivot_values: ", (int)k);
-                for(I i = 0; i < m; ++i)
-                    printf("%f ", common[i]);
-                printf(" (pivot_index=%d)\n", (int)pivot_index);
-            }
-        }
-        __syncthreads(); // Must be outside if constexpr for non-float types!
+        // // Thread 0 of batch 0 prints all pivot_values
+        // if constexpr(std::is_same_v<T, float>){
+        //     if(myrow == 0 && id == 0)
+        //     {
+        //         printf("DEBUG k=%d pivot_values: ", (int)k);
+        //         for(I i = 0; i < m; ++i)
+        //             printf("%f ", common[i]);
+        //         printf(" (pivot_index=%d)\n", (int)pivot_index);
+        //     }
+        // }
+        // __syncthreads(); // Must be outside if constexpr for non-float types!
         
-        // Restore original common value
-        common[myrow] = temp_common_val;
-        __syncthreads();
+        // // Restore original common value
+        // common[myrow] = temp_common_val;
+        // __syncthreads();
 
         // check singularity and scale value for current column
         if(pivot_value != T(0))
@@ -153,19 +172,19 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
         // DEBUG: Print matrix A at end of iteration k
         // Each thread owns a row (tracked by myrow), print row by row in order
         // NOTE: __syncthreads() must be hit by ALL threads in block, so it's outside if(id==0)
-        if constexpr(std::is_same_v<T, float>){
-            for(I row = 0; row < m; ++row)
-            {
-                if(id == 0 && myrow == row) // Only batch 0, only the thread owning this row
-                {
-                    printf("DEBUG Iter k=%d Row %d: ", (int)k, (int)row);
-                    for(I j = 0; j < DIM; ++j)
-                        printf("%f ", rA[j]);
-                    printf("\n");
-                }
-                __syncthreads(); // ALL threads must hit this!
-            }
-        }
+        // if constexpr(std::is_same_v<T, float>){
+        //     for(I row = 0; row < m; ++row)
+        //     {
+        //         if(id == 0 && myrow == row) // Only batch 0, only the thread owning this row
+        //         {
+        //             printf("DEBUG Iter k=%d Row %d: ", (int)k, (int)row);
+        //             for(I j = 0; j < DIM; ++j)
+        //                 printf("%f ", rA[j]);
+        //             printf("\n");
+        //         }
+        //         __syncthreads(); // ALL threads must hit this!
+        //     }
+        // }
     }
 
     // write results to global memory
@@ -176,6 +195,57 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
 #pragma unroll DIM
     for(I j = 0; j < DIM; ++j)
         A[myrow + j * lda] = rA[j];
+
+    // Gold verification (only if gold_ptr is provided)
+    if constexpr(std::is_same_v<T, float>) {
+        if(gold_ptr != nullptr) {
+            __syncthreads();  // Ensure all writes are complete
+            
+            // Get pointer to gold matrix for this batch
+            // Gold matrices are stored row-major, 3 matrices (one per batch) for this checkpoint
+            // Layout: gold_ptr[batch * GOLD_MATRIX_SIZE + row * gold_lda + col]
+            const T* gold_matrix = gold_ptr + id * getf2_gold::GOLD_MATRIX_SIZE;
+            
+            // The gold matrix is 70x70, representing the full matrix state
+            // Our submatrix starts at (offset, offset) in the full matrix
+            // myrow is the row within our submatrix that this thread wrote
+            // So the gold row is: offset + myrow
+            // And gold col for element j is: offset + j
+            
+            const I gold_row = offset + myrow;
+            const T tolerance = 1e-4f;
+            bool has_mismatch = false;
+            
+            // Compare each element in this thread's row
+            for(I j = 0; j < DIM; ++j) {
+                const I gold_col = offset + j;
+                const T expected = gold_matrix[gold_row * gold_lda + gold_col];
+                const T computed = rA[j];
+                T diff = computed - expected;
+                if(diff < T(0)) diff = -diff;
+                
+                T scale = expected;
+                if(scale < T(0)) scale = -scale;
+                if(scale < T(1)) scale = T(1);
+                
+                if(diff > tolerance * scale) {
+                    // Print mismatch (limit output to avoid flooding)
+                    if(!has_mismatch) {
+                        printf("GOLD MISMATCH: batch=%d row=%d (myrow=%d offset=%d) col=%d: "
+                               "computed=%.6f expected=%.6f diff=%.6e\n",
+                               (int)id, (int)gold_row, (int)myrow, (int)offset, (int)gold_col,
+                               computed, expected, diff);
+                        has_mismatch = true;
+                    }
+                }
+            }
+            
+            // Optionally abort on mismatch (uncomment to enable)
+            // if(has_mismatch) {
+            //     __trap();  // Abort kernel execution
+            // }
+        }
+    }
 }
 
 /** getf2_npvt_small_kernel (non pivoting version) **/
@@ -599,13 +669,16 @@ rocblas_status getf2_run_small(rocblas_handle handle,
                                const bool pivot,
                                const I offset,
                                I* permut_idx,
-                               const rocblas_stride stride)
+                               const rocblas_stride stride,
+                               // Gold verification arguments (optional, defaults in forward declaration)
+                               T* gold_ptr,
+                               const I gold_lda)
 {
 #define RUN_LUFACT_SMALL(DIM)                                                                      \
     if(pivot)                                                                                      \
         ROCSOLVER_LAUNCH_KERNEL((getf2_small_kernel<DIM, T>), grid, block, lmemsize, stream, m, A, \
                                 shiftA, lda, strideA, ipiv, shiftP, strideP, info, batch_count,    \
-                                offset, permut_idx, stride);                                       \
+                                offset, permut_idx, stride, gold_ptr, gold_lda);                   \
     else                                                                                           \
         ROCSOLVER_LAUNCH_KERNEL((getf2_npvt_small_kernel<DIM, T>), grid, block, lmemsize, stream,  \
                                 m, A, shiftA, lda, strideA, info, batch_count, offset)
@@ -627,6 +700,16 @@ rocblas_status getf2_run_small(rocblas_handle handle,
     size_t lmemsize = msize * ngrp * sizeof(T);
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
+
+    // DEBUG: Capture arguments for reproducer (only for float type)
+    // if constexpr(std::is_same_v<T, float>) {
+    //     hipStreamSynchronize(stream);
+    //     getf2_capture::captureArgs<T, I, INFO, U>(
+    //         m, n, A, shiftA, lda, strideA,
+    //         ipiv, shiftP, strideP,
+    //         info, batch_count, pivot, offset, permut_idx, stride,
+    //         grid, block, lmemsize, GETF2_CAPTURE_DIR);
+    // }
 
     // instantiate cases to make number of columns n known at compile time
     // this should allow loop unrolling.
@@ -802,7 +885,8 @@ void getf2_run_scale_update(rocblas_handle handle,
         rocblas_handle handle, const I m, const I n, U A, const rocblas_stride shiftA,   \
         const I lda, const rocblas_stride strideA, I* ipiv, const rocblas_stride shiftP, \
         const rocblas_stride strideP, INFO* info, const I batch_count, const bool pivot, \
-        const I offset, I* permut_idx, const rocblas_stride stride)
+        const I offset, I* permut_idx, const rocblas_stride stride,                      \
+        T* gold_ptr, const I gold_lda)
 #define INSTANTIATE_GETF2_PANEL(T, I, INFO, U)                                           \
     template rocblas_status getf2_run_panel<T, I, INFO, U>(                              \
         rocblas_handle handle, const I m, const I n, U A, const rocblas_stride shiftA,   \
