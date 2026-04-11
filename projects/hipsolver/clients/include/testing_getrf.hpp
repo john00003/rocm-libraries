@@ -21,6 +21,10 @@
  *
  * ************************************************************************ */
 
+#include <cstdio>
+#include <cstdlib>
+#include <string>
+
 #include "clientcommon.hpp"
 
 template <testAPI_t API,
@@ -347,6 +351,109 @@ void getrf_getError(const hipsolverHandle_t   handle,
     CHECK_HIP_ERROR(hARes.transfer_from(dA));
     CHECK_HIP_ERROR(hIpivRes.transfer_from(dIpiv));
     CHECK_HIP_ERROR(hInfoRes.transfer_from(dInfo));
+
+    // Dump matrices to files if GETRF_DUMP_DIR is set (real types only)
+    if constexpr(!is_complex<T>)
+    {
+        const char* dump_dir = std::getenv("GETRF_DUMP_DIR");
+        if(dump_dir)
+        {
+            std::string prefix = std::string(dump_dir) + "/hipsolver_m" + std::to_string(m) + "_n"
+                                 + std::to_string(n) + "_bc" + std::to_string(bc);
+
+            // Dump input matrix hA (before cpu_getrf modifies it)
+            {
+                FILE* f = std::fopen((prefix + "_A_input.txt").c_str(), "w");
+                if(f)
+                {
+                    for(int b = 0; b < bc; ++b)
+                    {
+                        std::fprintf(f,
+                                     "# batch_index=%d  m=%d  n=%d  lda=%d\n",
+                                     b,
+                                     (int)m,
+                                     (int)n,
+                                     (int)lda);
+                        for(I j = 0; j < n; ++j)
+                        {
+                            for(I i = 0; i < m; ++i)
+                            {
+                                if(i > 0)
+                                    std::fprintf(f, " ");
+                                std::fprintf(f, "%.17e", (double)hA[b][i + j * lda]);
+                            }
+                            std::fprintf(f, "\n");
+                        }
+                        std::fprintf(f, "\n");
+                    }
+                    std::fclose(f);
+                }
+            }
+
+            // Dump output matrix hARes
+            {
+                FILE* f = std::fopen((prefix + "_A_output.txt").c_str(), "w");
+                if(f)
+                {
+                    for(int b = 0; b < bc; ++b)
+                    {
+                        std::fprintf(f,
+                                     "# batch_index=%d  m=%d  n=%d  lda=%d\n",
+                                     b,
+                                     (int)m,
+                                     (int)n,
+                                     (int)lda);
+                        for(I j = 0; j < n; ++j)
+                        {
+                            for(I i = 0; i < m; ++i)
+                            {
+                                if(i > 0)
+                                    std::fprintf(f, " ");
+                                std::fprintf(f, "%.17e", (double)hARes[b][i + j * lda]);
+                            }
+                            std::fprintf(f, "\n");
+                        }
+                        std::fprintf(f, "\n");
+                    }
+                    std::fclose(f);
+                }
+            }
+
+            // Dump pivot array hIpivRes
+            {
+                FILE* f = std::fopen((prefix + "_ipiv.txt").c_str(), "w");
+                if(f)
+                {
+                    for(int b = 0; b < bc; ++b)
+                    {
+                        std::fprintf(f, "# batch_index=%d\n", b);
+                        for(I i = 0; i < min(m, n); ++i)
+                        {
+                            if(i > 0)
+                                std::fprintf(f, " ");
+                            std::fprintf(f, "%d", (int)hIpivRes[b][i]);
+                        }
+                        std::fprintf(f, "\n\n");
+                    }
+                    std::fclose(f);
+                }
+            }
+
+            // Dump info array hInfoRes
+            {
+                FILE* f = std::fopen((prefix + "_info.txt").c_str(), "w");
+                if(f)
+                {
+                    for(int b = 0; b < bc; ++b)
+                    {
+                        std::fprintf(f, "# batch_index=%d\n", b);
+                        std::fprintf(f, "%d\n\n", (int)hInfoRes[b][0]);
+                    }
+                    std::fclose(f);
+                }
+            }
+        }
+    }
 
     // CPU lapack
     for(int b = 0; b < bc; ++b)
